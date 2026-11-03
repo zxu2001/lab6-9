@@ -1,0 +1,37 @@
+@startuml
+skinparam componentStyle rectangle
+
+package "Presentation" {
+  [Swing Views] as Views
+  [Controllers or Presenters] as Controllers
+}
+
+package "Application" {
+  [Application Services] as Services
+  [Report and Notification Workflows] as Workflows
+}
+
+package "Domain" {
+  [Entities and Value Objects] as Domain
+  [Financial Rules] as Rules
+}
+
+package "Infrastructure" {
+  [Repository Adapters] as Repositories
+  [Desktop Storage] as Storage
+}
+
+Views --> Controllers
+Controllers --> Services
+Controllers --> Workflows
+Services --> Domain
+Workflows --> Domain
+Rules --> Domain
+Services --> Repositories
+Repositories --> Storage
+
+note right of Domain
+  No Swing, persistence,
+  or infrastructure types.
+end note
+@enduml
