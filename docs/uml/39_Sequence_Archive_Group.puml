@@ -1,0 +1,45 @@
+@startuml 39_Sequence_Archive_Group
+title Sequence - Archive Group with concurrent expense creation (D29, D36; CON-04)
+autonumber
+actor Owner
+actor Member
+participant "GroupService" as GS
+participant "ExpenseService" as ES
+participant "GroupRepository" as GR
+participant "BalanceService" as BS
+participant "GroupArchivePolicy" as AP
+participant "InvitationRepository" as IR
+participant "AuditService" as AU
+
+Owner -> GS : archiveGroup(actor, g, expectedVersion)
+group TX RW (archive) - group ledger lock
+  GS -> GR : lockById(g) (FOR UPDATE) - granted
+  Member -> ES : createExpense(actor, g, ...)
+  ES -> GR : lockById(g) - BLOCKED until archive TX ends
+  GS -> GS : requireOwner; group ACTIVE; version matches
+  GS -> BS : computeNetBalances(g)
+  GS -> GR : count PENDING_APPROVAL expenses, OPEN cancellation requests
+  GS -> AP : evaluate(group, nets, pending, open)
+  alt not eligible (non-zero balance or unresolved workflow)
+    AP --> GS : reasons
+    GS --> Owner : refused with reasons (rollback)
+  else eligible
+    GS -> IR : revoke all PENDING invitations (GROUP_ARCHIVED)
+    GS -> GR : group.archive() -> ARCHIVED (irreversible)
+    GS -> AU : record(GROUP_ARCHIVED)
+    GS --> Owner : archived (COMMIT, lock released)
+  end
+end
+group TX RW (expense) - resumes after lock is released
+  GR --> ES : lock granted; group re-read
+  alt group now ARCHIVED
+    ES --> Member : GroupArchivedException (409, read-only)
+  else archive was refused
+    ES -> ES : normal creation continues
+  end
+end
+note over GS, ES
+  If the expense transaction had locked first, it would commit a
+  PENDING_APPROVAL expense and the archive check would then refuse.
+end note
+@enduml

@@ -1,0 +1,55 @@
+@startuml 33_Sequence_Cancel_Approved_Expense
+title Sequence - Cancel an APPROVED Expense (unanimous cancellation approval, D14)
+autonumber
+actor Creator
+actor "Cancellation approver" as CA
+participant "CancellationController" as C
+participant "ExpenseCancellationService" as CS
+participant "GroupRepository" as GR
+participant "CancellationPolicy" as CP
+participant "ApproverSetResolver" as AR
+participant "Expense (domain)" as E
+participant "CancellationRequestRepository" as RR
+participant "NotificationService" as NS
+participant "AuditService" as AU
+
+Creator -> C : POST .../expenses/{e}/cancellation-requests (reason)
+C -> CS : requestCancellation(actor, e, reason)
+group TX RW - group ledger lock
+  CS -> GR : lockById(groupId)
+  CS -> CP : checkOpenRequest(expense, actor, ctx)
+  alt not creator / not APPROVED / OPEN request exists / inactive involved
+    CP --> CS : violation
+    CS --> C : error (rollback)
+  end
+  CS -> AR : resolve(creator, effective payer, effective participants)
+  CS -> RR : save(request OPEN, frozen approvers)
+  alt approver set empty
+    CS -> E : applyCancellation (auto-approved, audited)
+  else
+    CS -> NS : createCancellationApprovalRequests(request)
+    CS -> AU : record(CANCELLATION_REQUESTED)
+  end
+end
+note over E : Expense remains APPROVED and keeps\naffecting balances while request is OPEN
+
+CA -> C : POST .../cancellation-requests/{r}/approve or /reject
+C -> CS : approveCancellation / rejectCancellation
+group TX RW - group ledger lock
+  CS -> GR : lockById(groupId)
+  CS -> RR : load request (must be OPEN; actor in frozen set, undecided)
+  alt reject (reason required)
+    CS -> RR : request REJECTED
+    CS -> AU : record(CANCELLATION_REJECTED)
+    note right : expense stays APPROVED;\ncreator may open a new request (DA-19)
+  else approve and others undecided
+    CS -> AU : record(CANCELLATION_DECISION_RECORDED)
+  else approve and last approver
+    CS -> RR : request APPROVED
+    CS -> E : applyCancellation: version + expense CANCELLED,\neffective_version_id = NULL
+    CS -> AU : record(CANCELLATION_APPROVED, EXPENSE_CANCELLED)
+    note right : completed payments untouched (D40);\nbalances recomputed, direction may flip
+  end
+end
+CS --> C : CancellationOutcome
+@enduml

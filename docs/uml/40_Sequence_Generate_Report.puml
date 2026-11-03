@@ -1,0 +1,44 @@
+@startuml 40_Sequence_Generate_Report
+title Sequence - Generate Filtered Report (D05, D21; EFFECTIVE vs HISTORY mode)
+autonumber
+actor Member
+participant "ReportController" as C
+participant "ReportService" as RS
+participant "AuthorizationService" as AZ
+participant "ReportQueryRepository" as RQ
+participant "BalanceCalculator" as BC
+
+Member -> C : GET /groups/{g}/reports?type&mode&from&to&member&category&paymentStatus
+C -> C : bind ReportFilterForm (syntax)
+C -> RS : generateReport(actor, criteria)
+group TX RO
+  RS -> AZ : requireReadAccess(actor, g)
+  alt non-member
+    RS --> C : 404
+  else inactive member
+    RS -> RS : add implicit involvement filter (DA-31)
+  end
+  RS -> RS : validate criteria (from <= to, member/category belong to group)
+  alt invalid filters
+    RS --> C : ValidationException -> filter form errors
+  end
+  alt type = EXPENSE and mode = EFFECTIVE
+    RS -> RQ : expenses with status APPROVED via effective_version_id
+  else type = EXPENSE and mode = HISTORY
+    RS -> RQ : all expenses (current or all versions), labelled by status
+  else type = PAYMENT
+    RS -> RQ : completed payments (status filter COMPLETED)
+  else type = BALANCE
+    RS -> RQ : ledger postings in range
+    RS -> BC : netBalances (assert sum = 0.00)
+    RS -> RS : settlement status filter SETTLED / OUTSTANDING (DA-28)
+  end
+  RQ --> RS : rows + SQL NUMERIC totals
+end
+RS --> C : ReportResult(rows, totals, appliedFilters, empty flag)
+alt no rows
+  C --> Member : "No records match these filters" + applied filters
+else rows
+  C --> Member : table + totals + applied filters (on screen; no CSV)
+end
+@enduml

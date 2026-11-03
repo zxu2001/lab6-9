@@ -1,0 +1,76 @@
+@startuml 06_Layered_MVC_Architecture
+title Logical Architecture - Layered + MVC (ADR-001)
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+
+actor Browser
+
+package "Presentation layer (com.splitsmart.web)" as P {
+  [Spring MVC Controllers\n(Controller)] as C
+  [Thymeleaf templates\n(View)] as V
+  [Form objects + view models\n(Model)] as M
+  [GlobalExceptionHandler] as EH
+}
+
+package "Application / service layer (com.splitsmart.application)" as A {
+  [Use-case services\n@Transactional] as S
+  [AuthorizationService] as AZ
+  [AuditService / NotificationService] as AN
+  interface "EmailService" as IEmail
+  interface "TokenService" as IToken
+  interface "ReceiptContentInspector" as IRci
+}
+
+package "Domain layer (com.splitsmart.domain)" as D {
+  [Entities and value objects\n(Money, Expense, ExpenseVersion, Payment)] as E
+  [Financial rules\n(SplitAllocator, BalanceCalculator,\nSettlementPlanner)] as F
+  [Policies\n(ApproverSetResolver, GroupArchivePolicy, ...)] as POL
+  interface "Repository interfaces" as IRepo
+}
+
+package "Persistence / infrastructure layer (com.splitsmart.infrastructure)" as I {
+  [JPA repository adapters\n+ Spring Data JPA] as R
+  [Spring Security configuration\n(form login, CSRF, sessions, BCrypt)] as SEC
+  [SesEmailService / MockEmailService] as EM
+  [SecureTokenService] as TK
+  [MagicByteReceiptInspector] as RI
+}
+
+database "PostgreSQL (RDS)" as DB
+cloud "Amazon SES" as SES
+
+Browser --> SEC : HTTPS request
+SEC --> C : authenticated request\n(runtime filter chain)
+C --> M
+C --> V : selects view
+C --> S : commands / result DTOs
+EH ..> V
+S --> AZ
+S --> AN
+S --> E
+S --> F
+S --> POL
+S --> IRepo
+S --> IEmail
+S --> IToken
+S --> IRci
+F --> E
+POL --> E
+R ..|> IRepo
+EM ..|> IEmail
+TK ..|> IToken
+RI ..|> IRci
+R --> DB
+EM --> SES
+
+note right of D
+  Domain depends only on the JDK
+  (+ jakarta.persistence annotations, AD-08).
+  No Spring MVC, Thymeleaf, PostgreSQL,
+  SES or infrastructure classes (NFR-006).
+end note
+note bottom of I
+  Compile-time dependencies point from infrastructure
+  to domain/application interfaces (dependency inversion).
+end note
+@enduml

@@ -1,0 +1,30 @@
+@startuml 17_Account_Verification_State_Machine
+title Account and Token State Machines - D11, D30
+
+state "User account" as UA {
+  [*] --> PENDING_VERIFICATION : register\n/ BCrypt hash, issue verification token (24 h)
+  PENDING_VERIFICATION --> PENDING_VERIFICATION : resend\n[rate limit ok]\n/ invalidate old tokens, issue new
+  PENDING_VERIFICATION --> ACTIVE : verify\n[token valid, unused, unexpired]
+  PENDING_VERIFICATION --> ACTIVE : password reset completed\n[valid reset token] (DA-41)
+  state ACTIVE {
+    state "Unlocked" as UL
+    state "Locked" as LK
+    [*] --> UL
+    UL --> LK : 5th consecutive failed login\n/ locked_until = now + 15 min
+    LK --> UL : [now >= locked_until] or password reset
+    UL --> UL : password reset\n/ invalidate sessions and reset tokens
+  }
+  ACTIVE --> DISABLED : administrative disable\n(outside MVP UI)
+}
+
+state "Verification / reset token" as TK {
+  [*] --> OPEN_TOKEN : issued (hash stored)
+  state "OPEN" as OPEN_TOKEN
+  state "USED" as USED_TOKEN
+  state "INVALIDATED" as INV_TOKEN
+  state "EXPIRED (derived)" as EXP_TOKEN
+  OPEN_TOKEN --> USED_TOKEN : redeemed\n[now < expires_at]
+  OPEN_TOKEN --> INV_TOKEN : newer token issued\nor reset completed
+  OPEN_TOKEN --> EXP_TOKEN : [now >= expires_at]
+}
+@enduml

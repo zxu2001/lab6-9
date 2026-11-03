@@ -1,0 +1,50 @@
+@startuml 19_Activity_Approve_Expense
+title Activity - Approve or Reject Expense Version (D02, D17, D28, D35, D41)
+
+|Required approver|
+start
+:Open expense from notification\nor "Pending approvals";
+:Choose Approve (optional comment)\nor Reject (reason required);
+|ExpenseApprovalService (TX RW)|
+partition "Transaction boundary" {
+  :Lock group row (FOR UPDATE);
+  :Load expense + current version;
+  if (actor ACTIVE member of ACTIVE group?) then (no)
+    :Rollback; 403 / 409;
+    stop
+  endif
+  if (versionId == current version AND status PENDING?) then (no)
+    :Rollback; 409 VERSION_NOT_CURRENT\n(edited, rejected or cancelled meanwhile);
+    stop
+  endif
+  if (actor in frozen approver set\n(never the creator, no owner override)?) then (no)
+    :Rollback; 403;
+    stop
+  endif
+  if (actor already decided?) then (yes)
+    :Rollback; ALREADY_DECIDED;
+    stop
+  endif
+  if (decision?) then (reject)
+    if (reason 1..500 chars?) then (no)
+      :Rollback; field error;
+      stop
+    endif
+    :Record REJECTED decision;
+    :Version REJECTED; expense REJECTED (final, D28);
+    :Audit EXPENSE_REJECTED;
+  else (approve)
+    :Record APPROVED decision;\naudit EXPENSE_APPROVAL_RECORDED;
+    if (all required approvers approved?) then (yes)
+      :Version APPROVED; expense APPROVED;\neffective_version_id = version;\never_approved = true;
+      :Audit EXPENSE_APPROVED\n(expense now affects balances);
+    else (no)
+      :Remain PENDING_APPROVAL\n(no deadline, D41);
+    endif
+  endif
+  :Commit (optimistic @Version checked);
+}
+|Required approver|
+:See updated status (PRG);
+stop
+@enduml

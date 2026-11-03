@@ -1,0 +1,79 @@
+@startuml 08_Package_Diagram
+title Package Diagram - com.splitsmart (allowed compile-time dependencies)
+skinparam packageStyle folder
+
+package "com.splitsmart.web" {
+  package "web.controller" as WC {
+  }
+  package "web.form" as WF {
+  }
+  package "web.view" as WV {
+  }
+  package "web.advice" as WA {
+  }
+}
+package "com.splitsmart.application" {
+  package "application.service" as AS {
+  }
+  package "application.command" as AC {
+  }
+  package "application.result" as AR {
+  }
+  package "application.security" as ASEC {
+  }
+  package "application.integration" as AI {
+  }
+}
+package "com.splitsmart.domain" {
+  package "domain.model" as DM {
+  }
+  package "domain.finance" as DF {
+  }
+  package "domain.policy" as DP {
+  }
+  package "domain.repository" as DR {
+  }
+  package "domain.exception" as DE {
+  }
+}
+package "com.splitsmart.infrastructure" {
+  package "infrastructure.persistence" as IP {
+  }
+  package "infrastructure.email" as IE {
+  }
+  package "infrastructure.security" as IS {
+  }
+  package "infrastructure.token" as IT {
+  }
+  package "infrastructure.receipt" as IR {
+  }
+}
+
+WC ..> AS
+WC ..> AC
+WC ..> AR
+WC ..> WF
+WC ..> WV
+WA ..> DE
+AS ..> DM
+AS ..> DF
+AS ..> DP
+AS ..> DR
+AS ..> AI
+AS ..> ASEC
+DF ..> DM
+DP ..> DM
+IP ..> DR : implements
+IP ..> DM
+IE ..> AI : implements
+IT ..> AI : implements
+IR ..> AI : implements
+IS ..> DR
+
+note as N1
+  Forbidden (UT-ARCH-01/02):
+  web -> infrastructure, web -> domain.repository,
+  application -> web or infrastructure,
+  domain -> any other top-level package.
+end note
+@enduml

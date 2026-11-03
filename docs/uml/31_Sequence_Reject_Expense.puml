@@ -1,0 +1,36 @@
+@startuml 31_Sequence_Reject_Expense
+title Sequence - Reject Expense Version (any rejection is final, D02, D28)
+autonumber
+actor Approver
+participant "ApprovalController" as C
+participant "ExpenseApprovalService" as AS
+participant "GroupRepository" as GR
+participant "AuthorizationService" as AZ
+participant "Expense (domain)" as E
+participant "AuditService" as AU
+
+Approver -> C : POST .../versions/{v}/reject (reason, CSRF)
+alt reason blank or > 500 chars
+  C --> Approver : field error (no service call)
+end
+C -> AS : reject(actor, expenseId, v, reason)
+group TX RW - group ledger lock
+  AS -> GR : lockById(groupId)
+  AS -> AZ : requireActiveMemberOfActiveGroup; requireRequiredApprover(actor, v)
+  alt not an approver of the current PENDING version
+    AS --> C : 403 / 409 (rollback)
+  end
+  AS -> E : recordRejection(actor, reason, now)
+  E -> E : decision REJECTED (immutable)
+  E -> E : version REJECTED; expense REJECTED\n(remaining approvers moot)
+  AS -> AU : record(EXPENSE_REJECTED, reason)
+end
+AS --> C : ApprovalOutcome(REJECTED)
+C --> Approver : "Expense rejected"
+note over E
+  REJECTED is final: no edit, reopen or resubmit (D28).
+  Never affects balances. Creator must create a NEW expense.
+  If this was an edit of a previously approved expense,
+  the whole expense is REJECTED (DA-18, Q-01).
+end note
+@enduml

@@ -1,0 +1,47 @@
+@startuml 30_Sequence_Approve_Expense
+title Sequence - Approve Expense Version (unanimous, D02, D35)
+autonumber
+actor Approver
+participant "ApprovalController" as C
+participant "ExpenseApprovalService" as AS
+participant "GroupRepository" as GR
+participant "ExpenseRepository" as ER
+participant "AuthorizationService" as AZ
+participant "Expense (domain)" as E
+participant "AuditService" as AU
+
+Approver -> C : POST .../versions/{v}/approve (comment, CSRF)
+C -> AS : approve(actor, expenseId, v, comment)
+group TX RW - group ledger lock
+  AS -> ER : findById(expenseId)
+  AS -> GR : lockById(expense.groupId)
+  AS -> AZ : requireActiveMemberOfActiveGroup(actor, groupId)
+  alt v != current version or version not PENDING
+    AS --> C : 409 VERSION_NOT_CURRENT (rollback)
+  end
+  AS -> AZ : requireRequiredApprover(actor, version)
+  alt actor is creator or not in frozen set
+    AZ --> AS : ForbiddenException
+    AS --> C : 403 (rollback)
+  end
+  AS -> E : recordApproval(actor, comment, now)
+  alt already decided
+    E --> AS : BusinessRuleViolation(ALREADY_DECIDED)
+    AS --> C : error (rollback)
+  else others still undecided
+    E --> AS : outcome(remaining > 0)
+    AS -> AU : record(EXPENSE_APPROVAL_RECORDED)
+  else last approval
+    E -> E : version APPROVED; expense APPROVED;\neffective_version_id = version; ever_approved = true
+    AS -> AU : record(EXPENSE_APPROVAL_RECORDED)
+    AS -> AU : record(EXPENSE_APPROVED)
+  end
+  AS -> ER : flush (@Version optimistic check)
+  alt optimistic lock conflict
+    ER --> AS : OptimisticLockException
+    AS --> C : 409 reload (rollback)
+  end
+end
+AS --> C : ApprovalOutcome
+C --> Approver : redirect with status
+@enduml

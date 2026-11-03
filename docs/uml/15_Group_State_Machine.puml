@@ -1,0 +1,26 @@
+@startuml 15_Group_State_Machine
+title Group and Membership State Machines - D08, D16, D17, D29, D36
+
+state "Group" as G {
+  [*] --> ACTIVE : verified user creates group\n/ creator = owner + ACTIVE member
+  ACTIVE --> ACTIVE : transfer ownership\n[actor = owner, target ACTIVE member]
+  ACTIVE --> ARCHIVED : owner archives\n[all nets = 0.00 and\nno PENDING_APPROVAL expense and\nno OPEN cancellation request]\n/ revoke PENDING invitations
+  state ARCHIVED #lightgray {
+    ARCHIVED : read-only (D29)
+    ARCHIVED : irreversible, no deletion (D36)
+  }
+}
+
+state "Membership" as M {
+  [*] --> M_ACTIVE : accept invitation\n[verified, matching email]
+  state "ACTIVE" as M_ACTIVE
+  state "INACTIVE" as M_INACTIVE
+  M_ACTIVE --> M_INACTIVE : leave / owner removes\n[not owner and net = 0.00 and\nno unresolved responsibilities] (D16)
+  M_INACTIVE --> M_ACTIVE : accepts new invitation\n[group ACTIVE] (DA-36)
+}
+
+note bottom of M
+  Rows are never deleted; historical participation,
+  approvals and payments keep their references (FR-027).
+end note
+@enduml

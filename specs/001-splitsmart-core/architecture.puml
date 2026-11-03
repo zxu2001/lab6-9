@@ -1,37 +1,51 @@
-@startuml
+@startuml architecture
+title SplitSmart - Layered + MVC summary (v2; detailed diagrams in docs/uml)
 skinparam componentStyle rectangle
 
-package "Presentation" {
-  [Swing Views] as Views
-  [Controllers or Presenters] as Controllers
+package "Presentation (Spring MVC + Thymeleaf)" {
+  [Controllers] as Controllers
+  [Thymeleaf Views] as Views
+  [Forms and View Models] as Models
 }
 
-package "Application" {
+package "Application (services, @Transactional)" {
   [Application Services] as Services
-  [Report and Notification Workflows] as Workflows
+  [AuthorizationService] as Authz
+  interface "EmailService" as IEmail
 }
 
 package "Domain" {
-  [Entities and Value Objects] as Domain
-  [Financial Rules] as Rules
+  [Entities and Value Objects] as DomainModel
+  [Financial Rules\n(SplitAllocator, BalanceCalculator,\nSettlementPlanner)] as Rules
+  interface "Repository interfaces" as IRepo
 }
 
 package "Infrastructure" {
-  [Repository Adapters] as Repositories
-  [Desktop Storage] as Storage
+  [JPA Repository Adapters] as Repositories
+  [SES / Mock Email Adapter] as Email
+  [Spring Security Configuration] as Security
 }
 
-Views --> Controllers
-Controllers --> Services
-Controllers --> Workflows
-Services --> Domain
-Workflows --> Domain
-Rules --> Domain
-Services --> Repositories
-Repositories --> Storage
+database "PostgreSQL (Amazon RDS)" as DB
+cloud "Amazon SES" as SES
 
-note right of Domain
-  No Swing, persistence,
-  or infrastructure types.
+Security --> Controllers : authenticated requests
+Controllers --> Models
+Controllers --> Views
+Controllers --> Services
+Services --> Authz
+Services --> DomainModel
+Services --> Rules
+Services --> IRepo
+Services --> IEmail
+Rules --> DomainModel
+Repositories ..|> IRepo
+Email ..|> IEmail
+Repositories --> DB
+Email --> SES
+
+note right of DomainModel
+  No Spring MVC, Thymeleaf, PostgreSQL,
+  SES or infrastructure types (ADR-001).
 end note
 @enduml

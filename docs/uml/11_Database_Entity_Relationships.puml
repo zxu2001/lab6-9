@@ -1,0 +1,202 @@
+@startuml 11_Database_Entity_Relationships
+title Database Entity Relationships (PostgreSQL schema, planned Flyway V1-V11)
+hide circle
+skinparam linetype ortho
+
+entity users {
+  * id : BIGINT <<PK>>
+  --
+  * email : VARCHAR(320) <<UQ>>
+  * display_name : VARCHAR(100)
+  * password_hash : VARCHAR(100)
+  * status : VARCHAR(30)
+  email_verified_at : TIMESTAMPTZ
+  * version : BIGINT
+}
+entity email_verification_tokens {
+  * id : BIGINT <<PK>>
+  --
+  * user_id : BIGINT <<FK>>
+  * token_hash : CHAR(64) <<UQ>>
+  * expires_at : TIMESTAMPTZ
+  used_at : TIMESTAMPTZ
+}
+entity password_reset_tokens {
+  * id : BIGINT <<PK>>
+  --
+  * user_id : BIGINT <<FK>>
+  * token_hash : CHAR(64) <<UQ>>
+  * expires_at : TIMESTAMPTZ
+  used_at : TIMESTAMPTZ
+}
+entity expense_groups {
+  * id : BIGINT <<PK>>
+  --
+  * name : VARCHAR(100)
+  * owner_user_id : BIGINT <<FK>>
+  * status : ACTIVE or ARCHIVED
+  * version : BIGINT
+}
+entity group_memberships {
+  * id : BIGINT <<PK>>
+  --
+  * group_id : BIGINT <<FK>>
+  * user_id : BIGINT <<FK>>
+  * status : ACTIVE or INACTIVE
+  deactivation_reason : VARCHAR(20)
+  * version : BIGINT
+}
+entity group_invitations {
+  * id : BIGINT <<PK>>
+  --
+  * group_id : BIGINT <<FK>>
+  * invited_email : VARCHAR(320)
+  * token_hash : CHAR(64) <<UQ>>
+  * status : PENDING/ACCEPTED/EXPIRED/REVOKED
+  * expires_at : TIMESTAMPTZ
+}
+entity expense_categories {
+  * id : BIGINT <<PK>>
+  --
+  group_id : BIGINT <<FK>> (NULL = predefined)
+  * name : VARCHAR(50)
+  * active : BOOLEAN
+}
+entity expenses {
+  * id : BIGINT <<PK>>
+  --
+  * group_id : BIGINT <<FK>>
+  * creator_user_id : BIGINT
+  * status : PENDING_APPROVAL/APPROVED/REJECTED/CANCELLED
+  current_version_id : BIGINT <<FK>>
+  effective_version_id : BIGINT <<FK>>
+  * ever_approved : BOOLEAN
+  * version : BIGINT
+}
+entity expense_versions {
+  * id : BIGINT <<PK>>
+  --
+  * expense_id : BIGINT <<FK>>
+  * version_number : INTEGER
+  * amount : NUMERIC(19,2)
+  * currency : CHAR(3) = USD
+  * expense_date : DATE
+  * category_id : BIGINT <<FK>>
+  * payer_user_id : BIGINT
+  * split_method : EQUAL or PERCENTAGE
+  * status : PENDING/APPROVED/REJECTED/SUPERSEDED/CANCELLED
+}
+entity expense_allocations {
+  * id : BIGINT <<PK>>
+  --
+  * expense_version_id : BIGINT <<FK>>
+  * participant_user_id : BIGINT
+  percentage : NUMERIC(5,2)
+  * share_amount : NUMERIC(19,2)
+}
+entity expense_approvals {
+  * id : BIGINT <<PK>>
+  --
+  * expense_version_id : BIGINT <<FK>>
+  * approver_user_id : BIGINT
+  * basis : VARCHAR(30)
+  decision : APPROVED or REJECTED
+  reason : VARCHAR(500)
+  * version : BIGINT
+}
+entity expense_cancellation_requests {
+  * id : BIGINT <<PK>>
+  --
+  * expense_id : BIGINT <<FK>>
+  * expense_version_id : BIGINT <<FK>>
+  * status : OPEN/APPROVED/REJECTED
+  * version : BIGINT
+}
+entity cancellation_approvals {
+  * id : BIGINT <<PK>>
+  --
+  * cancellation_request_id : BIGINT <<FK>>
+  * approver_user_id : BIGINT
+  decision : APPROVED or REJECTED
+  reason : VARCHAR(500)
+}
+entity receipts {
+  * id : BIGINT <<PK>>
+  --
+  * expense_id : BIGINT <<FK>>
+  * content_type : jpeg/png/pdf
+  * size_bytes : INTEGER (<= 10 MiB)
+  * sha256 : CHAR(64)
+}
+entity receipt_contents {
+  * receipt_id : BIGINT <<PK, FK>>
+  --
+  * content : BYTEA
+}
+entity expense_version_receipts {
+  * expense_version_id : BIGINT <<PK, FK>>
+  * receipt_id : BIGINT <<PK, FK>>
+  --
+  * display_order : SMALLINT (1..10)
+}
+entity payments <<immutable>> {
+  * id : BIGINT <<PK>>
+  --
+  * group_id : BIGINT <<FK>>
+  * debtor_user_id : BIGINT
+  * creditor_user_id : BIGINT
+  * amount : NUMERIC(19,2)
+  * displayed_amount : NUMERIC(19,2)
+  * amount_adjusted : BOOLEAN
+  * status : COMPLETED
+  * idempotency_key : UUID <<UQ>>
+}
+entity notifications {
+  * id : BIGINT <<PK>>
+  --
+  * recipient_user_id : BIGINT <<FK>>
+  * type : VARCHAR(40)
+  expense_version_id : BIGINT <<FK>>
+  cancellation_request_id : BIGINT <<FK>>
+  read_at : TIMESTAMPTZ
+}
+entity audit_events <<insert-only>> {
+  * id : BIGINT <<PK>>
+  --
+  * occurred_at : TIMESTAMPTZ
+  actor_user_id : BIGINT <<FK>>
+  group_id : BIGINT <<FK>>
+  * event_type : VARCHAR(60)
+  * details : JSONB
+}
+
+users ||--o{ email_verification_tokens
+users ||--o{ password_reset_tokens
+users ||--o{ group_memberships
+expense_groups ||--|{ group_memberships
+users ||--o{ expense_groups : owns
+expense_groups ||--o{ group_invitations
+expense_groups |o--o{ expense_categories
+expense_groups ||--o{ expenses
+group_memberships ||--o{ expenses : creator
+expenses ||--|{ expense_versions
+expense_versions ||--|{ expense_allocations
+group_memberships ||--o{ expense_allocations : participant
+expense_versions ||--o{ expense_approvals
+expense_categories ||--o{ expense_versions
+expenses ||--o{ expense_cancellation_requests
+expense_cancellation_requests ||--o{ cancellation_approvals
+expenses ||--o{ receipts
+receipts ||--|| receipt_contents
+expense_versions ||--o{ expense_version_receipts
+receipts ||--o{ expense_version_receipts
+expense_groups ||--o{ payments
+group_memberships ||--o{ payments : debtor / creditor
+users ||--o{ notifications
+users |o--o{ audit_events
+
+note bottom of payments
+  Balances are NOT stored: derived from
+  view v_ledger_postings (DA-12).
+end note
+@enduml

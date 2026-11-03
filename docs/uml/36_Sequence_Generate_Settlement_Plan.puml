@@ -1,0 +1,35 @@
+@startuml 36_Sequence_Generate_Settlement_Plan
+title Sequence - Generate Simplified Settlement Plan (D34; deterministic greedy)
+autonumber
+actor Member
+participant "BalanceController" as C
+participant "SettlementService" as SS
+participant "BalanceService" as BS
+participant "SettlementPlanner" as SP
+
+Member -> C : GET /groups/{g}/balances (plan section)
+C -> SS : getSettlementPlan(actor, g)
+group TX RO
+  SS -> BS : computeNetBalances(g) (after read authorization)
+  BS --> SS : NetBalances (sum = 0.00)
+  SS -> SP : plan(nets)
+  SP -> SP : creditors (net > 0), debtors (net < 0)
+  SP -> SP : sort both by (amount DESC, user id ASC)
+  loop while debtor and creditor remain
+    SP -> SP : x = min(remaining); emit Transfer(debtor -> creditor, x);\nadvance exhausted pointer(s)
+  end
+  SP -> SP : assert all remainders 0 (conservation)
+  SP --> SS : SettlementPlan(transfers <= k-1, fingerprint)
+end
+SS --> C : SettlementPlanView
+alt actor is debtor in a transfer
+  C --> Member : show "Settle $x with creditor" button
+else no transfer for actor
+  C --> Member : plan shown read-only
+end
+note over SP
+  Plan is a derived recommendation; it is recomputed
+  on every request and never stored. Not claimed to be
+  globally minimal (only <= k-1 transfers).
+end note
+@enduml

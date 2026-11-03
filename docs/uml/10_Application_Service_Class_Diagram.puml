@@ -1,0 +1,113 @@
+@startuml 10_Application_Service_Class_Diagram
+title Application Service Class Diagram (com.splitsmart.application)
+hide empty members
+skinparam classAttributeIconSize 0
+
+interface ExpenseService {
+  +createExpense(actor, CreateExpenseCommand) : ExpenseSubmissionResult
+  +editExpense(actor, expenseId, EditExpenseCommand) : ExpenseSubmissionResult
+  +getExpense(actor, groupId, expenseId) : ExpenseDetails
+}
+interface ExpenseApprovalService {
+  +approve(actor, expenseId, versionId, comment) : ApprovalOutcome
+  +reject(actor, expenseId, versionId, reason) : ApprovalOutcome
+  +listMyPendingApprovals(actor) : List<PendingApprovalView>
+}
+interface ExpenseCancellationService {
+  +cancelPendingExpense(actor, expenseId, basedOnVersion) : CancellationOutcome
+  +requestCancellation(actor, expenseId, reason) : CancellationRequestView
+  +approveCancellation(actor, requestId) : CancellationOutcome
+  +rejectCancellation(actor, requestId, reason) : CancellationOutcome
+}
+interface PaymentService {
+  +preparePayment(actor, groupId, creditorId) : PaymentPreparation
+  +recordSettlement(actor, RecordSettlementCommand) : PaymentOutcome
+  +listPayments(actor, groupId, filter) : List<PaymentView>
+}
+interface SettlementService {
+  +getSettlementPlan(actor, groupId) : SettlementPlanView
+  ~computePlan(groupId) : SettlementPlan
+}
+interface BalanceService {
+  +getGroupBalances(actor, groupId) : GroupBalanceView
+  +getOverview(actor) : CrossGroupOverview
+  ~computeNetBalances(groupId) : NetBalances
+}
+interface GroupService {
+  +createGroup(actor, cmd) : long
+  +transferOwnership(actor, groupId, newOwnerId, expectedVersion)
+  +archiveGroup(actor, groupId, expectedVersion)
+}
+interface MembershipService {
+  +leaveGroup(actor, groupId)
+  +removeMember(actor, groupId, memberId)
+  +checkDeactivation(actor, groupId, memberId) : DeactivationEligibility
+}
+interface InvitationService {
+  +issueInvitation(actor, groupId, email) : IssuedInvitation
+  +acceptByToken(actor, rawToken) : long
+  +revokeInvitation(actor, groupId, invitationId, expectedVersion)
+}
+interface NotificationService {
+  ~createApprovalRequests(version, type)
+  ~createCancellationApprovalRequests(request)
+  +listMyNotifications(actor, unreadOnly, page)
+  +markRead(actor, notificationId)
+}
+interface ReportService {
+  +generateReport(actor, ReportCriteria) : ReportResult
+}
+interface AccountService
+interface PasswordResetService
+interface ReceiptService
+interface CategoryService
+interface AuditService {
+  ~record(type, actor, groupId, entityType, entityId, details)
+}
+class AuthorizationService {
+  +requireReadAccess(actor, groupId) : GroupAccess
+  +requireActiveMemberOfActiveGroup(actor, groupId) : GroupAccess
+  +requireOwner(access)
+  +requireCreator(actor, expense)
+  +requireRequiredApprover(actor, version)
+  +requireDebtor(actor, transfer)
+}
+interface EmailService <<integration>> {
+  +sendVerificationEmail(to, name, link, expiresAt)
+  +sendPasswordResetEmail(to, name, link, expiresAt)
+}
+interface TokenService <<integration>>
+
+class ExpenseServiceImpl <<@Service @Transactional>>
+class PaymentServiceImpl <<@Service @Transactional>>
+ExpenseServiceImpl ..|> ExpenseService
+PaymentServiceImpl ..|> PaymentService
+
+ExpenseServiceImpl --> AuthorizationService
+ExpenseServiceImpl --> NotificationService
+ExpenseServiceImpl --> ReceiptService
+ExpenseServiceImpl --> AuditService
+PaymentServiceImpl --> AuthorizationService
+PaymentServiceImpl --> SettlementService
+PaymentServiceImpl --> AuditService
+SettlementService ..> BalanceService
+GroupService ..> BalanceService
+MembershipService ..> BalanceService
+ExpenseCancellationService ..> NotificationService
+AccountService ..> EmailService : after commit
+AccountService ..> TokenService
+PasswordResetService ..> EmailService : after commit
+InvitationService ..> TokenService
+
+package "domain.repository" {
+  interface GroupRepository
+  interface ExpenseRepository
+  interface PaymentRepository
+  interface LedgerQueryRepository
+}
+ExpenseServiceImpl --> GroupRepository : lockById
+ExpenseServiceImpl --> ExpenseRepository
+PaymentServiceImpl --> GroupRepository : lockById
+PaymentServiceImpl --> PaymentRepository
+PaymentServiceImpl --> LedgerQueryRepository
+@enduml

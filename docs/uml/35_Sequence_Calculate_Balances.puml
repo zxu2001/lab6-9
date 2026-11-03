@@ -1,0 +1,44 @@
+@startuml 35_Sequence_Calculate_Balances
+title Sequence - Calculate Group Net Balances (D21, D34; derived, not stored)
+autonumber
+actor Member
+participant "BalanceController" as C
+participant "BalanceService" as BS
+participant "AuthorizationService" as AZ
+participant "LedgerQueryRepository" as LQ
+database "PostgreSQL\nv_ledger_postings" as DB
+participant "BalanceCalculator" as BC
+
+Member -> C : GET /groups/{g}/balances
+C -> BS : getGroupBalances(actor, g)
+group TX RO (READ COMMITTED snapshot per statement)
+  BS -> AZ : requireReadAccess(actor, g)
+  alt non-member
+    AZ --> BS : NotFoundException
+    BS --> C : 404
+  end
+  BS -> LQ : findPostings(g)
+  LQ -> DB : SELECT ... FROM v_ledger_postings WHERE group_id = g
+  note right of DB
+    effective versions of APPROVED expenses:
+      payer +amount, participants -share
+    completed payments:
+      debtor +x, creditor -x
+    (pending / rejected / cancelled / superseded excluded)
+  end note
+  DB --> LQ : rows
+  LQ --> BS : List<LedgerPosting>
+  BS -> BC : netBalances(g, memberIds, postings)
+  BC -> BC : sum per member in integer cents
+  alt sum of nets != 0.00
+    BC --> BS : LedgerInconsistencyException
+    BS --> C : 500 + alert
+  end
+  BC --> BS : NetBalances (sum = 0.00)
+  alt actor is INACTIVE member
+    BS -> BS : restrict view to own balance (DA-31)
+  end
+end
+BS --> C : GroupBalanceView
+C --> Member : balances page (per group only; no cross-group offset)
+@enduml

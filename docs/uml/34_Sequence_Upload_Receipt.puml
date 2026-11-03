@@ -1,0 +1,59 @@
+@startuml 34_Sequence_Upload_Receipt
+title Sequence - Receipt Upload (within create/edit) and Download (D13, D27)
+autonumber
+actor Creator
+actor Member
+participant "ExpenseController" as EC
+participant "ReceiptController" as RC
+participant "ExpenseService" as ES
+participant "ReceiptService" as RS
+participant "ReceiptContentInspector" as RI
+participant "ReceiptRepository" as RR
+participant "AuthorizationService" as AZ
+
+== Upload: part of create / edit expense (one transaction) ==
+Creator -> EC : multipart POST with files (each <= 10 MiB by servlet limit)
+alt multipart limit exceeded
+  EC --> Creator : 413 / form error RECEIPT_TOO_LARGE
+end
+EC -> ES : createExpense / editExpense(cmd with ReceiptUpload list)
+group TX RW - group ledger lock
+  loop each new file
+    ES -> RS : validate(upload)
+    RS -> RI : detect(bytes) (magic bytes)
+    alt UNKNOWN type (declared type / extension ignored)
+      RS --> ES : RECEIPT_TYPE_NOT_ALLOWED
+    else JPEG or PNG
+      RS -> RI : imageDecodes(bytes) (<= 40 MP)
+      alt not decodable
+        RS --> ES : RECEIPT_CORRUPT
+      end
+    else PDF
+      RS -> RS : check %PDF- header and %%EOF trailer
+    end
+  end
+  alt total receipts for new version > 10
+    ES --> EC : RECEIPT_LIMIT (rollback)
+  end
+  ES -> RS : storeForVersion(version, new, retainedIds)
+  RS -> RR : insert receipts (metadata, sha256, sanitized name)
+  RS -> RR : insert receipt_contents (BYTEA)
+  RS -> RR : insert expense_version_receipts links\n(retained receipts linked by reference)
+end
+note over RR : any failure rolls back expense, version AND receipts
+
+== Download ==
+Member -> RC : GET /groups/{g}/receipts/{r}
+RC -> RS : download(actor, g, r)
+RS -> RR : find receipt by id AND group
+alt not found or other group
+  RS --> RC : NotFoundException (404)
+end
+RS -> AZ : requireExpenseReadAccess(actor, expense)
+alt no access (non-member, or inactive and not involved)
+  AZ --> RS : NotFoundException (404)
+end
+RS -> RR : loadContent(r)
+RS --> RC : ReceiptDownload
+RC --> Member : 200, Content-Disposition: attachment,\nstored Content-Type, nosniff, no-store
+@enduml

@@ -1,0 +1,54 @@
+@startuml 03_Use_Case_Group_Management
+title Use Cases - Group Management (D08, D16, D17, D22, D29, D36, D37)
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Verified User" as User
+actor "Invitee\n(verified, matching email)" as Invitee
+actor "Active Member" as Member
+actor "Group Owner" as Owner
+actor "System Clock" as Clock
+
+User <|-- Invitee
+Member <|-- Owner
+
+rectangle "Group Management" {
+  usecase "Create group\n(becomes owner)" as G1
+  usecase "Issue invitation\n(single-use, 7 days)" as G2
+  usecase "Revoke pending invitation" as G3
+  usecase "Accept invitation" as G4
+  usecase "Leave group" as G5
+  usecase "Remove member" as G6
+  usecase "Check deactivation\neligibility" as G6a
+  usecase "Transfer ownership" as G7
+  usecase "Create / rename /\ndeactivate custom category" as G8
+  usecase "Archive group\n(irreversible)" as G9
+  usecase "Check archive eligibility" as G9a
+  usecase "Expire invitation" as G10
+}
+
+User --> G1
+Owner --> G2
+Owner --> G3
+Invitee --> G4
+Member --> G5
+Owner --> G6
+Owner --> G7
+Owner --> G8
+Owner --> G9
+Clock --> G10
+G5 ..> G6a : <<include>>
+G6 ..> G6a : <<include>>
+G9 ..> G9a : <<include>>
+
+note right of G6a
+  Blocked if net balance <> 0.00 or
+  unresolved approval / cancellation
+  responsibilities (D16).
+  Owner must transfer first (D17).
+end note
+note right of G9a
+  All balances 0.00, no pending expenses,
+  no OPEN cancellation requests (D29).
+end note
+@enduml

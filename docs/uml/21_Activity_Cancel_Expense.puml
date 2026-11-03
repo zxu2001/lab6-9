@@ -1,0 +1,61 @@
+@startuml 21_Activity_Cancel_Expense
+title Activity - Cancel Expense (direct or by unanimous cancellation approval) (D14, D15, D40, DA-17, DA-19)
+
+|Creator|
+start
+:Choose "Cancel expense";
+|ExpenseCancellationService (TX RW, group lock)|
+:Lock group row; verify creator,\nACTIVE member of ACTIVE group;
+if (expense status?) then (PENDING_APPROVAL)
+  if (ever_approved?) then (false)
+    :Current version -> CANCELLED;\nexpense -> CANCELLED;
+    :Audit EXPENSE_CANCELLED (DIRECT);
+    :Commit;
+    stop
+  else (true)
+    :Refuse CANCEL_BLOCKED_REAPPROVAL_PENDING\n(DA-17: wait for edit outcome);
+    stop
+  endif
+elseif (APPROVED)
+  if (OPEN request exists or\ninvolved member INACTIVE?) then (yes)
+    :Refuse;
+    stop
+  endif
+  :Freeze cancellation approvers =\n(effective participants U payer) - creator;
+  :Insert request OPEN\n(expense remains APPROVED and effective);
+  if (approver set empty?) then (yes)
+    :Auto-approve request;\napply cancellation (expense CANCELLED);\naudit CANCELLATION_AUTO_APPROVED;
+    :Commit;
+    stop
+  endif
+  :CANCELLATION_APPROVAL_REQUESTED notifications;\naudit CANCELLATION_REQUESTED;
+  :Commit;
+else (REJECTED / CANCELLED)
+  :Refuse (final);
+  stop
+endif
+
+|Cancellation approver|
+repeat
+  :Decide (approve / reject with reason);
+  |ExpenseCancellationService (TX RW, group lock)|
+  :Lock group; verify approver in frozen set, undecided,\nrequest OPEN;
+  if (reject?) then (yes)
+    :Request REJECTED; expense stays APPROVED;\naudit CANCELLATION_REJECTED;
+    :Commit;
+    note right: creator may open a new request later (DA-19)
+    stop
+  endif
+  :Record approval;
+repeat while (other approvers undecided?) is (yes)
+->no;
+:Request APPROVED; expense + effective version CANCELLED;\neffective_version_id = NULL;
+note right
+  Completed payments are NOT edited,
+  deleted or reversed (D14, D40);
+  balances are recomputed.
+end note
+:Audit CANCELLATION_APPROVED, EXPENSE_CANCELLED;
+:Commit;
+stop
+@enduml

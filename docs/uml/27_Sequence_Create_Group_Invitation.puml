@@ -1,0 +1,41 @@
+@startuml 27_Sequence_Create_Group_Invitation
+title Sequence - Owner Issues Group Invitation (D08, D37, DA-23)
+autonumber
+actor Owner
+participant "InvitationController" as C
+participant "InvitationService" as IS
+participant "AuthorizationService" as AZ
+participant "GroupRepository" as GR
+participant "InvitationRepository" as IR
+participant "TokenService" as TS
+participant "AuditService" as AU
+
+Owner -> C : POST /groups/{g}/invitations (email, CSRF)
+C -> IS : issueInvitation(actor, g, email)
+group TX RW - group ledger lock
+  IS -> GR : lockById(g)  [SELECT ... FOR UPDATE]
+  IS -> AZ : requireActiveMemberOfActiveGroup + requireOwner
+  alt not owner
+    AZ --> IS : ForbiddenException
+    IS --> C : 403 (rollback)
+  else group ARCHIVED
+    GR --> IS : GroupArchivedException
+    IS --> C : 409 "archived groups cannot issue invitations"
+  end
+  IS -> IS : EmailAddress.of(email) (normalize)
+  alt email belongs to ACTIVE member
+    IS --> C : ALREADY_MEMBER (rollback)
+  end
+  IS -> IR : expire due PENDING for (g, email)
+  IS -> IR : existsPending(g, email)?
+  alt pending invitation exists
+    IS --> C : PENDING_INVITATION_EXISTS (rollback)
+  end
+  IS -> TS : generate()
+  TS --> IS : raw (256-bit) + sha256Hex
+  IS -> IR : save(PENDING, token_hash, expires = now + 7 days)
+  IS -> AU : record(INVITATION_ISSUED, email hash)
+end
+IS --> C : IssuedInvitation(acceptUrl with raw token, expiresAt)
+C --> Owner : show link ONCE with copy button\n(no invitation email is sent, DA-23)
+@enduml

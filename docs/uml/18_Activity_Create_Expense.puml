@@ -1,0 +1,45 @@
+@startuml 18_Activity_Create_Expense
+title Activity - Create Expense (D02, D09, D15, D20, D25, D26, D35, D38)
+
+|Member (browser)|
+start
+:Open "New expense" form\n(active members, selectable categories);
+:Enter amount, date, description, category,\npayer (default = self), split method,\nparticipants, percentages, receipts;
+:Submit (POST multipart + CSRF);
+|ExpenseController|
+:Bind ExpenseForm; Bean Validation (syntax);
+if (syntax errors?) then (yes)
+  :Re-render form with field errors\n(values preserved);
+  stop
+endif
+:Build CreateExpenseCommand;
+|ExpenseService (TX RW)|
+partition "Transaction boundary (all-or-nothing)" {
+  :Lock group row (SELECT ... FOR UPDATE);
+  if (actor ACTIVE member of ACTIVE group?) then (no)
+    :Rollback; 403 / 404 / 409 (archived);
+    stop
+  endif
+  :Validate amount (0.01..1,000,000.00, <= 2 dp, USD),\ndate <= today, category, payer ACTIVE,\nparticipants ACTIVE (frozen), receipts;
+  if (split = PERCENTAGE?) then (yes)
+    :Validate each % (<= 2 dp, > 0) and sum = 100.00;
+  endif
+  if (any validation error?) then (yes)
+    :Rollback; return field errors;
+    stop
+  endif
+  :SplitAllocator: integer cents, leftover cents\nby stable participant id; assert sum = amount;
+  :ApproverSetResolver:\n(participants U {payer}) - {creator};
+  :Persist expense, version 1 (PENDING),\nallocations, approver rows, receipts;
+  if (approver set empty?) then (yes)
+    :Auto-approve: version + expense APPROVED,\neffective = v1; audit EXPENSE_AUTO_APPROVED;
+  else (no)
+    :Create one EXPENSE_APPROVAL_REQUESTED\nnotification per approver;
+  endif
+  :Audit EXPENSE_CREATED;
+  :Commit;
+}
+|ExpenseController|
+:Redirect (PRG) to expense page with status;
+stop
+@enduml

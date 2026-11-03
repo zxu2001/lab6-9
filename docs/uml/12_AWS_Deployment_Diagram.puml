@@ -1,0 +1,38 @@
+@startuml 12_AWS_Deployment_Diagram
+title Physical Deployment - AWS (design only, not provisioned; D12)
+
+actor "User browser" as B
+node "AWS Region" {
+  node "VPC 10.20.0.0/16" {
+    node "Public subnets (2 AZ)" {
+      node "Application Load Balancer\nHTTPS :443 (ACM certificate)\n:80 redirects to HTTPS" as ALB
+      node "NAT Gateway" as NAT
+    }
+    node "Private app subnet" {
+      node "EC2 Amazon Linux 2023\nAmazon Corretto 21\nsg-app: 8080 from sg-alb only" as EC2 {
+        artifact "splitsmart.jar\n(web + application + domain\n+ infrastructure layers)" as JAR
+      }
+    }
+    node "Private DB subnets (2 AZ)" {
+      database "Amazon RDS PostgreSQL 16\nencrypted, rds.force_ssl=1\nautomated backups 7 days\nsg-db: 5432 from sg-app only" as RDS
+    }
+  }
+  cloud "Amazon SES\n(verified domain, DKIM)" as SES
+  cloud "AWS Secrets Manager\nsplitsmart/prod/db-app" as SM
+  cloud "CloudWatch Logs and Alarms" as CW
+}
+
+B --> ALB : HTTPS (TLS 1.2+)
+ALB --> JAR : HTTP 8080 inside VPC\n(X-Forwarded-Proto)
+JAR --> RDS : JDBC over TLS (verify-full)
+JAR --> NAT : outbound only
+NAT --> SES : SendEmail (instance role,\nses:FromAddress condition)
+NAT --> SM : GetSecretValue
+JAR ..> CW : logs and metrics
+
+note right of EC2
+  IMDSv2, no SSH (SSM Session Manager)
+  single instance, in-memory sessions (DA-30)
+  Flyway runs as separate release step (D32)
+end note
+@enduml

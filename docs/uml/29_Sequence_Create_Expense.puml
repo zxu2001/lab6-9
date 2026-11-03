@@ -1,0 +1,50 @@
+@startuml 29_Sequence_Create_Expense
+title Sequence - Create Expense (D02, D09, D15, D20, D25, D26, D35, D38)
+autonumber
+actor Creator
+participant "ExpenseController" as C
+participant "ExpenseService" as ES
+participant "GroupRepository" as GR
+participant "AuthorizationService" as AZ
+participant "ReceiptService" as RS
+participant "SplitAllocator" as SA
+participant "ApproverSetResolver" as AR
+participant "Expense (domain)" as E
+participant "ExpenseRepository" as ER
+participant "NotificationService" as NS
+participant "AuditService" as AU
+
+Creator -> C : POST /groups/{g}/expenses/new (multipart, CSRF)
+C -> C : bind ExpenseForm, Bean Validation
+C -> ES : createExpense(actor, CreateExpenseCommand)
+group TX RW - group ledger lock (atomic)
+  ES -> GR : lockById(g)
+  ES -> AZ : requireActiveMemberOfActiveGroup(actor, g)
+  alt archived group / inactive member
+    AZ --> ES : GroupArchivedException / ForbiddenException
+    ES --> C : 409 / 403 (rollback)
+  end
+  ES -> ES : parse amount, date, category, payer ACTIVE,\nparticipants ACTIVE (frozen), percentages
+  ES -> RS : validate(receipts) (type by magic bytes, size, count)
+  alt any validation error
+    ES --> C : ValidationException(field errors) (rollback)
+    C --> Creator : re-render form, values preserved
+  end
+  ES -> SA : allocate(amount, participants / percentages)
+  SA --> ES : shares (integer cents, leftover by user id, sum = amount)
+  ES -> AR : resolve(creator, payer, participants)
+  AR --> ES : approvers = (participants U payer) - creator
+  ES -> E : submit(...) -> v1 PENDING
+  ES -> ER : save(expense, v1, allocations, approver rows)
+  ES -> RS : storeForVersion(v1, receipts)
+  alt approver set empty
+    ES -> E : autoApprove(now) -> APPROVED, effective = v1
+    ES -> AU : record(EXPENSE_AUTO_APPROVED)
+  else approvers present
+    ES -> NS : createApprovalRequests(v1, EXPENSE_APPROVAL_REQUESTED)
+  end
+  ES -> AU : record(EXPENSE_CREATED)
+end
+ES --> C : ExpenseSubmissionResult
+C --> Creator : redirect (PRG) to expense page
+@enduml

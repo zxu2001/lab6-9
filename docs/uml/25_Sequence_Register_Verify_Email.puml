@@ -1,0 +1,61 @@
+@startuml 25_Sequence_Register_Verify_Email
+title Sequence - Register and Verify Email (D11, D30, D31)
+autonumber
+actor Visitor
+participant "AuthController" as C
+participant "AccountService" as AS
+participant "TokenService" as TS
+participant "UserAccountRepository" as UR
+participant "VerificationTokenRepository" as VR
+participant "AuditService" as AU
+participant "VerificationEmailListener\n(AFTER_COMMIT)" as L
+participant "EmailService\n(SesEmailService)" as ES
+participant "Amazon SES" as SES
+
+Visitor -> C : POST /register (email, name, password, CSRF)
+C -> C : Bean Validation (syntax)
+alt syntax invalid
+  C --> Visitor : re-render form with field errors
+end
+C -> AS : register(cmd, clientInfo)
+group TX RW
+  AS -> UR : existsByEmail(normalized)
+  alt email exists (ACTIVE)
+    AS --> C : ValidationException(email, EXISTS)
+    C --> Visitor : form error (rollback)
+  else new email
+    AS -> UR : save(UserAccount PENDING_VERIFICATION, BCrypt hash)
+    AS -> TS : generate()
+    TS --> AS : raw token + SHA-256 hash
+    AS -> VR : save(hash, expires = now + 24h)
+    AS -> AU : record(USER_REGISTERED)
+    AS -> AS : publish VerificationEmailRequested(raw)
+  end
+end
+AS --> C : RegistrationResult(PENDING_VERIFICATION)
+C --> Visitor : redirect "Check your email"
+L -> ES : sendVerificationEmail(to, link with raw token)
+ES -> SES : SendEmail
+alt SES failure
+  SES --> ES : error
+  ES --> L : exception (logged, no token in log)
+  note right of L : account stays PENDING_VERIFICATION;\nuser can request resend (rate-limited)
+end
+
+== Later: user clicks link ==
+Visitor -> C : GET /verify/{rawToken}
+C -> AS : verifyEmail(rawToken)
+group TX RW
+  AS -> VR : findByHash(sha256(raw))
+  alt token valid, unused, unexpired
+    AS -> UR : user.verifyEmail(now) -> ACTIVE
+    AS -> VR : token.markUsed(now)
+    AS -> AU : record(EMAIL_VERIFIED)
+    AS --> C : VERIFIED
+    C --> Visitor : "Email verified, please sign in"
+  else invalid / expired / used
+    AS --> C : INVALID_OR_EXPIRED
+    C --> Visitor : generic page + resend form
+  end
+end
+@enduml

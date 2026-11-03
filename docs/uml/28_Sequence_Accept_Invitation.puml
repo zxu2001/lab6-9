@@ -1,0 +1,63 @@
+@startuml 28_Sequence_Accept_Invitation
+title Sequence - Accept Invitation (D37; expired / revoked / archived / wrong account paths)
+autonumber
+actor Invitee
+participant "Spring Security" as SEC
+participant "InvitationController" as C
+participant "InvitationService" as IS
+participant "GroupRepository" as GR
+participant "InvitationRepository" as IR
+participant "InvitationAcceptancePolicy" as P
+participant "MembershipRepository" as MR
+participant "AuditService" as AU
+
+Invitee -> C : GET /invitations/accept/{raw}
+C -> IS : previewByToken(raw, actor or null)
+IS --> C : group name, inviter, state (no reasons disclosed)
+alt not signed in
+  C --> Invitee : "Sign in to accept"
+  Invitee -> SEC : login (saved request returns here)
+end
+Invitee -> C : POST /invitations/accept/{raw} (CSRF)
+C -> IS : acceptByToken(actor, raw)
+group TX RW - group ledger lock
+  IS -> IR : findByTokenHash(sha256(raw))
+  alt not found
+    IS --> C : INVITATION_INVALID (generic)
+  end
+  IS -> GR : lockById(invitation.groupId)
+  IS -> IR : expireIfDue(now)
+  IS -> P : check(invitation, acceptor, group, membership, now)
+  alt status REVOKED
+    P --> IS : NOT_ACCEPTABLE(REVOKED)
+    IS --> C : "no longer valid"
+  else status EXPIRED (or just expired)
+    P --> IS : NOT_ACCEPTABLE(EXPIRED)
+    IS -> AU : record(INVITATION_EXPIRED)
+    IS --> C : "expired; ask owner for a new one"
+  else status ACCEPTED
+    P --> IS : NOT_ACCEPTABLE(ALREADY_USED)
+    IS --> C : "already used"
+  else group ARCHIVED
+    P --> IS : NOT_ACCEPTABLE(GROUP_ARCHIVED)
+    IS --> C : "group is archived"
+  else acceptor email != invited email
+    P --> IS : NOT_ACCEPTABLE(WRONG_ACCOUNT)
+    IS -> AU : record(INVITATION_WRONG_ACCOUNT)
+    IS --> C : generic "sent to a different address"\n(invitation stays PENDING, not consumed)
+  else already ACTIVE member
+    P --> IS : NOT_ACCEPTABLE(ALREADY_MEMBER)
+  else all checks pass
+    IS -> IR : invitation.accept() -> ACCEPTED (@Version)
+    alt former INACTIVE member
+      IS -> MR : reactivate(membership)
+      IS -> AU : record(MEMBER_REACTIVATED)
+    else new member
+      IS -> MR : save(new ACTIVE membership)
+    end
+    IS -> AU : record(INVITATION_ACCEPTED)
+    IS --> C : groupId
+    C --> Invitee : redirect to group page
+  end
+end
+@enduml

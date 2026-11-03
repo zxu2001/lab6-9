@@ -1,0 +1,21 @@
+@startuml 16_Invitation_State_Machine
+title Group Invitation State Machine - D08, D37
+
+[*] --> PENDING : owner issues\n[group ACTIVE and email not an active member\nand no other PENDING for (group, email)]\n/ store SHA-256(token), expires_at = now + 7 days
+
+PENDING --> ACCEPTED : accept\n[account ACTIVE and email matches\nand now < expires_at and group ACTIVE]\n/ create or reactivate membership
+PENDING --> EXPIRED : any access or sweep\n[now >= expires_at]
+PENDING --> REVOKED : owner revokes\n/ reason OWNER_REVOKED
+PENDING --> REVOKED : group archived\n/ reason GROUP_ARCHIVED
+PENDING --> PENDING : accept attempt by wrong account\n/ refuse, NOT consumed, audit
+
+state ACCEPTED #palegreen {
+  ACCEPTED : single use; terminal
+}
+state EXPIRED #lightgray
+state REVOKED #pink
+
+ACCEPTED --> [*]
+EXPIRED --> [*]
+REVOKED --> [*]
+@enduml

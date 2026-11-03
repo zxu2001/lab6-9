@@ -1,0 +1,45 @@
+@startuml 13_Expense_State_Machine
+title Expense (aggregate) State Machine - D02, D10, D14, D15, D28, D41
+
+[*] --> PENDING_APPROVAL : submit v1\n[required approvers not empty]
+[*] --> APPROVED : submit v1\n[approver set empty]\n/ auto-approve, audit EXPENSE_AUTO_APPROVED (D15)
+
+state PENDING_APPROVAL {
+  PENDING_APPROVAL : current version status = PENDING
+  PENDING_APPROVAL : effective_version_id = NULL (no ledger effect)
+  PENDING_APPROVAL : no deadline (D41)
+}
+state APPROVED {
+  APPROVED : effective_version_id = current version
+  APPROVED : contributes to group ledger
+  state "No open request" as NoReq
+  state "Cancellation OPEN\n(still effective, D14)" as CanOpen
+  [*] --> NoReq
+  NoReq --> CanOpen : creator requests cancellation\n[no inactive involved member]
+  CanOpen --> NoReq : any cancellation approver rejects\n/ request REJECTED
+}
+state REJECTED #pink {
+  REJECTED : final (D28)
+}
+state CANCELLED #lightgray {
+  CANCELLED : final; never affects balances
+}
+
+PENDING_APPROVAL --> PENDING_APPROVAL : approve\n[other approvers still undecided]
+PENDING_APPROVAL --> APPROVED : approve\n[last required approver]\n/ effective = current, ever_approved = true
+PENDING_APPROVAL --> REJECTED : reject [reason given]\n/ version REJECTED (D02)
+PENDING_APPROVAL --> PENDING_APPROVAL : creator edits\n[basedOn = current]\n/ old version SUPERSEDED, new PENDING
+PENDING_APPROVAL --> CANCELLED : creator cancels\n[ever_approved = false] (D14, DA-17)
+APPROVED --> PENDING_APPROVAL : creator edits\n[no OPEN cancellation, no inactive involved]\n/ old version SUPERSEDED, effective = NULL (D10)
+APPROVED --> APPROVED : edit producing empty approver set\n/ auto-approve new version
+APPROVED --> CANCELLED : last cancellation approver approves\n/ effective = NULL, payments untouched (D40)
+
+REJECTED --> [*]
+CANCELLED --> [*]
+
+note right of REJECTED
+  An edit of a previously approved
+  expense that is rejected also ends
+  here (DA-18, Q-01).
+end note
+@enduml

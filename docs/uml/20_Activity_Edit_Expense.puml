@@ -1,0 +1,53 @@
+@startuml 20_Activity_Edit_Expense
+title Activity - Edit Expense, Create New Immutable Version (D10, D25, D27, D28, DA-21, DA-32, DA-39)
+
+|Creator|
+start
+:Open edit form (based on version n);
+:Change fields, participants, payer,\npercentages and/or receipts;
+:Submit with basedOnVersionNumber = n;
+|ExpenseService (TX RW)|
+partition "Transaction boundary" {
+  :Lock group row (FOR UPDATE);
+  if (actor is creator AND ACTIVE member of ACTIVE group?) then (no)
+    :Rollback; 403 / 409;
+    stop
+  endif
+  if (expense status?) then (REJECTED or CANCELLED)
+    :Rollback; REJECTED_IS_FINAL / CANCELLED_IS_FINAL;
+    stop
+  else (PENDING_APPROVAL or APPROVED)
+  endif
+  if (basedOnVersionNumber == current?) then (no)
+    :Rollback; 409 STALE_VERSION;
+    stop
+  endif
+  if (OPEN cancellation request?) then (yes)
+    :Rollback; CANCELLATION_PENDING;
+    stop
+  endif
+  if (APPROVED and an involved member INACTIVE?) then (yes)
+    :Rollback; INVOLVES_INACTIVE_MEMBER;
+    stop
+  endif
+  :Validate new content (as on creation;\nparticipants ACTIVE now; receipts <= 10);
+  if (no change vs current version?) then (yes)
+    :Rollback; NO_CHANGES;
+    stop
+  endif
+  :Allocate shares; resolve NEW frozen approver set;
+  :Old current version -> SUPERSEDED\n(decisions kept as history);
+  :Insert version n+1 (PENDING) with allocations,\napprovers, receipt links (retained + new);
+  if (expense was APPROVED?) then (yes)
+    :effective_version_id = NULL;\nstatus = PENDING_APPROVAL\n(stops affecting balances now, D10);
+  endif
+  if (new approver set empty?) then (yes)
+    :Auto-approve v(n+1); effective = v(n+1);
+  else (no)
+    :EXPENSE_REAPPROVAL_REQUESTED notification\nper approver of v(n+1);
+  endif
+  :Audit EXPENSE_VERSION_CREATED;
+  :Commit;
+}
+stop
+@enduml

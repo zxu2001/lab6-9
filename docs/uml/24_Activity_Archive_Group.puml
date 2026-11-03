@@ -1,0 +1,36 @@
+@startuml 24_Activity_Archive_Group
+title Activity - Archive Group (D29, D36, D37)
+
+|Owner|
+start
+:Open "Archive group";
+|GroupService.checkArchiveEligibility (TX RO)|
+:Show eligibility and blocking reasons\n(non-zero balances, pending expenses,\nopen cancellation requests);
+|Owner|
+:Confirm irreversible archive\n(expectedGroupVersion, CSRF);
+|GroupService.archiveGroup (TX RW)|
+partition "Transaction boundary - group ledger lock" {
+  :SELECT group FOR UPDATE\n(blocks concurrent expense, approval,\npayment, invitation, membership changes);
+  if (actor is owner?) then (no)
+    :Rollback; 403;
+    stop
+  endif
+  if (group ACTIVE and version matches?) then (no)
+    :Rollback; 409 ALREADY_ARCHIVED / stale;
+    stop
+  endif
+  :Recompute all member net balances;
+  :Count PENDING_APPROVAL expenses;\ncount OPEN cancellation requests;
+  if (all nets 0.00 AND counts == 0?) then (no)
+    :Rollback; show blocking reasons;
+    stop
+  endif
+  :Revoke all PENDING invitations\n(reason GROUP_ARCHIVED);
+  :Group status ARCHIVED (irreversible, D36);
+  :Audit GROUP_ARCHIVED;
+  :Commit;
+}
+|Owner|
+:Group shown read-only;\nhistory, receipts, reports remain available;
+stop
+@enduml

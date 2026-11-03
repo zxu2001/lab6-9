@@ -1,0 +1,97 @@
+@startuml 07_Component_Diagram
+title Component Diagram - Controllers, Services, Domain, Infrastructure
+skinparam componentStyle rectangle
+
+package "web (presentation)" {
+  [AuthController] as AuthC
+  [GroupController] as GroupC
+  [InvitationController] as InvC
+  [ExpenseController] as ExpC
+  [ApprovalController] as AprC
+  [CancellationController] as CanC
+  [ReceiptController] as RcpC
+  [BalanceController] as BalC
+  [PaymentController] as PayC
+  [NotificationController] as NotC
+  [ReportController] as RptC
+}
+
+package "application (services)" {
+  [AccountService] as AccS
+  [PasswordResetService] as PwdS
+  [GroupService] as GrpS
+  [MembershipService] as MemS
+  [InvitationService] as InvS
+  [CategoryService] as CatS
+  [ExpenseService] as ExpS
+  [ExpenseApprovalService] as AprS
+  [ExpenseCancellationService] as CanS
+  [ReceiptService] as RcpS
+  [BalanceService] as BalS
+  [SettlementService] as SetS
+  [PaymentService] as PayS
+  [NotificationService] as NotS
+  [ReportService] as RptS
+  [AuditService] as AudS
+  [AuthorizationService] as AzS
+  interface "EmailService" as IEmail
+}
+
+package "domain" {
+  [SplitAllocator] as Alloc
+  [ApproverSetResolver] as AprRes
+  [BalanceCalculator] as BalCalc
+  [SettlementPlanner] as Planner
+  interface "Repository interfaces" as IRepos
+}
+
+package "infrastructure" {
+  [JPA repository adapters] as JRA
+  [SesEmailService] as SesE
+  [MockEmailService] as MockE
+}
+
+AuthC --> AccS
+AuthC --> PwdS
+GroupC --> GrpS
+GroupC --> MemS
+InvC --> InvS
+ExpC --> ExpS
+ExpC --> CatS
+AprC --> AprS
+CanC --> CanS
+RcpC --> RcpS
+BalC --> BalS
+BalC --> SetS
+PayC --> PayS
+NotC --> NotS
+RptC --> RptS
+
+ExpS --> Alloc
+ExpS --> AprRes
+ExpS --> RcpS
+ExpS --> NotS
+CanS --> AprRes
+CanS --> NotS
+BalS --> BalCalc
+SetS --> BalS
+SetS --> Planner
+PayS --> SetS
+GrpS --> BalS
+MemS --> BalS
+AccS --> IEmail : after commit
+PwdS --> IEmail : after commit
+ExpS --> IRepos
+AprS --> IRepos
+PayS --> IRepos
+ExpS --> AudS
+AprS --> AudS
+PayS --> AudS
+ExpS --> AzS
+AprS --> AzS
+PayS --> AzS
+
+JRA ..|> IRepos
+SesE ..|> IEmail
+MockE ..|> IEmail
+@enduml

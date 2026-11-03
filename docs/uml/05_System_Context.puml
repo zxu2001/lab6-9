@@ -1,0 +1,23 @@
+@startuml 05_System_Context
+title System Context - SplitSmart (web application, D01/D06)
+actor "Group member\n(browser)" as U
+actor "Anonymous visitor\n(browser)" as A
+rectangle "SplitSmart\nSpring Boot web application\n(Layered + MVC, Thymeleaf)" as SS #LightBlue
+database "Amazon RDS\nPostgreSQL 16" as DB
+cloud "Amazon SES" as SES
+cloud "AWS Secrets Manager" as SM
+actor "User email inbox" as INBOX
+
+U --> SS : HTTPS: sessions, forms\n(expenses, approvals, settlements, reports)
+A --> SS : HTTPS: register, verify, reset,\ninvitation preview
+SS --> DB : JDBC over TLS\n(all data incl. receipts BYTEA, D13)
+SS --> SES : SendEmail (verification and\npassword reset only, D31)
+SES --> INBOX : email
+SS --> SM : read DB credentials at startup
+
+note right of SS
+  No push notifications; approval requests are
+  in-app only (D04, D26). No S3 (D13).
+  No CSV export (D05).
+end note
+@enduml

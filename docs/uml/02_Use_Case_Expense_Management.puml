@@ -1,0 +1,57 @@
+@startuml 02_Use_Case_Expense_Management
+title Use Cases - Expense Management (D02, D09, D10, D14, D15, D20, D22, D25-D28, D35, D38, D41)
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Active Member\n(creator)" as Creator
+actor "Required Approver\n(payer and/or participant,\nnot the creator)" as Approver
+actor "Cancellation Approver" as CApprover
+actor "Inactive / Archived-group Member" as ReadOnly
+
+rectangle "Expense Management" {
+  usecase "Create expense\n(amount, date, description,\ncategory, payer, split)" as UC1
+  usecase "Choose split method\n(EQUAL / PERCENTAGE)" as UC1a
+  usecase "Attach receipts\n(0..10 JPEG/PNG/PDF)" as UC1b
+  usecase "Auto-approve\n(no required approvers)" as UC1c
+  usecase "Approve current version" as UC2
+  usecase "Reject current version\n(reason required)" as UC3
+  usecase "Edit expense\n(creates version n+1)" as UC4
+  usecase "Cancel never-approved\npending expense" as UC5
+  usecase "Request cancellation\nof approved expense" as UC6
+  usecase "Approve / reject\ncancellation" as UC7
+  usecase "View expense,\nversions, receipts, audit" as UC8
+}
+
+Creator --> UC1
+UC1 ..> UC1a : <<include>>
+UC1b ..> UC1 : <<extend>>
+UC1c ..> UC1 : <<extend>>\n[approver set empty]
+Creator --> UC4
+UC1b ..> UC4 : <<extend>>
+Creator --> UC5
+Creator --> UC6
+Approver --> UC2
+Approver --> UC3
+CApprover --> UC7
+Creator --> UC8
+Approver --> UC8
+ReadOnly --> UC8
+
+note right of UC2
+  Unanimous: all required approvers.
+  Approvers = (participants U {payer}) - {creator},
+  frozen per version (D35).
+end note
+note right of UC3
+  Any rejection -> expense REJECTED (final, D28).
+end note
+note right of UC4
+  Pending or approved only.
+  Approved edit stops affecting balances
+  until the new version is approved (D10).
+end note
+note right of UC6
+  Expense keeps affecting balances
+  while the request is OPEN (D14).
+end note
+@enduml

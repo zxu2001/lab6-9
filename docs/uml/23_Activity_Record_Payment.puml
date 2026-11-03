@@ -1,0 +1,43 @@
+@startuml 23_Activity_Record_Payment
+title Activity - Record Settlement Payment (D03, D23, D24, D39, D40)
+
+|Debtor (browser)|
+start
+:Open balances; choose "Settle with creditor";
+|PaymentService.preparePayment (TX RO)|
+:Compute plan; displayed = obligation(debtor, creditor);
+:Generate submission token (UUID);
+|Debtor (browser)|
+:Read amount and FINALITY WARNING\n(cannot be edited/reversed by anyone, D40);
+:Confirm (POST: creditor, displayed, token, CSRF);
+|PaymentService.recordSettlement (TX RW)|
+partition "Transaction boundary - group ledger lock" {
+  :SELECT group FOR UPDATE (lock_timeout 5 s);
+  if (group ACTIVE?) then (no)
+    :Rollback; GroupArchivedException;
+    stop
+  endif
+  if (actor and creditor ACTIVE members, actor != creditor?) then (no)
+    :Rollback; 403 / 404;
+    stop
+  endif
+  if (payment with this token exists?) then (yes)
+    :Return ALREADY_RECORDED (idempotent replay);
+    stop
+  endif
+  :Recompute postings -> nets -> plan\n(consistent: no concurrent ledger writer);
+  :obligation = plan.obligation(actor, creditor);
+  if (obligation == 0.00?) then (yes)
+    :Audit PAYMENT_NOT_CREATED_ZERO_OBLIGATION;
+    :Commit; return ZERO_OBLIGATION (no payment, D24);
+    stop
+  endif
+  :Payment.settle: amount = obligation (full, D23),\nrecorder = debtor (D39), status COMPLETED (D03),\nadjusted = (displayed != obligation);
+  :INSERT payment (unique idempotency key);
+  :Audit PAYMENT_RECORDED (amount, displayed, adjusted);
+  :Commit;
+}
+|Debtor (browser)|
+:Redirect (PRG) to balances with message\n(shows actual amount and any adjustment, D24);
+stop
+@enduml

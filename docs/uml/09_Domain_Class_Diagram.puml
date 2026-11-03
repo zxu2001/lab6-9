@@ -1,0 +1,202 @@
+@startuml 09_Domain_Class_Diagram
+title Domain Class Diagram (com.splitsmart.domain)
+hide empty members
+skinparam classAttributeIconSize 0
+
+package "domain.model" {
+  class UserAccount {
+    id : Long
+    email : EmailAddress
+    displayName : String
+    passwordHash : String
+    status : UserStatus
+    emailVerifiedAt : Instant
+    failedLoginCount : int
+    lockedUntil : Instant
+    version : long
+    +verifyEmail(now)
+    +changePassword(newHash, now)
+  }
+  class Group {
+    id : Long
+    name : String
+    ownerUserId : long
+    status : GroupStatus
+    archivedAt : Instant
+    version : long
+    +requireActive()
+    +transferOwnership(actor, target)
+    +archive(actor, eligibility, now)
+  }
+  class GroupMembership {
+    groupId : long
+    userId : long
+    status : MembershipStatus
+    deactivationReason : DeactivationReason
+    version : long
+    +deactivate(actor, reason, eligibility, now)
+    +reactivate(invitationId, now)
+  }
+  class GroupInvitation {
+    invitedEmail : EmailAddress
+    tokenHash : String
+    status : InvitationStatus
+    expiresAt : Instant
+    version : long
+    +accept(acceptor, group, now)
+    +revoke(actor, reason, now)
+    +expireIfDue(now) : boolean
+  }
+  class ExpenseCategory {
+    groupId : Long
+    name : String
+    active : boolean
+    +rename(newName, actor)
+    +deactivate(actor)
+  }
+  class Expense {
+    id : Long
+    groupId : long
+    creatorUserId : long
+    status : ExpenseStatus
+    everApproved : boolean
+    version : long
+    +{static} submit(groupId, creator, draft, alloc, approvers, now) : Expense
+    +recordApproval(approver, comment, now) : ApprovalOutcome
+    +recordRejection(approver, reason, now)
+    +edit(actor, draft, alloc, approvers, expectedNo, ctx, now) : ExpenseVersion
+    +cancelPending(actor, now)
+    +openCancellation(actor, reason, approvers, now) : ExpenseCancellationRequest
+    +applyCancellation(request, now)
+  }
+  class ExpenseVersion <<immutable content>> {
+    versionNumber : int
+    amount : Money
+    expenseDate : LocalDate
+    description : String
+    payerUserId : long
+    splitMethod : SplitMethod
+    status : ExpenseVersionStatus
+    autoApproved : boolean
+  }
+  class ExpenseAllocation <<immutable>> {
+    participantUserId : long
+    percentage : Percentage
+    share : Money
+  }
+  class ExpenseApproval {
+    approverUserId : long
+    basis : ApprovalBasis
+    decision : ApprovalDecision
+    decidedAt : Instant
+    reason : String
+  }
+  class ExpenseCancellationRequest {
+    status : CancellationRequestStatus
+    reason : String
+    autoApproved : boolean
+    +recordApproval(approver, now)
+    +recordRejection(approver, reason, now)
+  }
+  class CancellationApproval {
+    approverUserId : long
+    decision : ApprovalDecision
+    reason : String
+  }
+  class Receipt <<immutable>> {
+    contentType : ReceiptContentType
+    sizeBytes : int
+    sha256 : String
+    originalFilename : String
+  }
+  class Payment <<immutable>> {
+    debtorUserId : long
+    creditorUserId : long
+    amount : Money
+    displayedAmount : Money
+    amountAdjusted : boolean
+    status : PaymentStatus
+    idempotencyKey : UUID
+    +{static} settle(groupId, transfer, actor, displayed, key, note, today, now) : Payment
+  }
+  class Notification {
+    recipientUserId : long
+    type : NotificationType
+    readAt : Instant
+    +markRead(actor, now)
+  }
+}
+
+package "domain.finance" {
+  class Money <<value object>> {
+    amount : BigDecimal
+    +plus(other) : Money
+    +minus(other) : Money
+    +toCents() : long
+  }
+  class Percentage <<value object>>
+  class SplitAllocator <<domain service>> {
+    +allocateEqual(amount, participantIds) : Allocation
+    +allocatePercentage(amount, percentages) : Allocation
+  }
+  class BalanceCalculator <<domain service>> {
+    +netBalances(groupId, memberIds, postings) : NetBalances
+  }
+  class SettlementPlanner <<domain service>> {
+    +plan(nets) : SettlementPlan
+  }
+  class SettlementPlan <<value object>> {
+    transfers : List<Transfer>
+    +obligation(debtorId, creditorId) : Money
+  }
+  class Transfer <<value object>>
+  class LedgerPosting <<value object>>
+}
+
+package "domain.policy" {
+  class ApproverSetResolver <<domain service>> {
+    +resolve(creatorId, payerId, participantIds) : ApproverSet
+  }
+  class GroupArchivePolicy <<domain service>>
+  class MembershipDeactivationPolicy <<domain service>>
+  class ExpenseEditPolicy <<domain service>>
+  class CancellationPolicy <<domain service>>
+}
+
+package "domain.repository" {
+  interface ExpenseRepository
+  interface PaymentRepository
+  interface GroupRepository {
+    +lockById(id) : Group
+  }
+  interface LedgerQueryRepository {
+    +findPostings(groupId) : List<LedgerPosting>
+  }
+}
+
+Group "1" *-- "1..*" GroupMembership
+Group "1" o-- "0..*" GroupInvitation
+Group "0..1" o-- "0..*" ExpenseCategory : custom
+Group "1" o-- "0..*" Expense
+Expense "1" *-- "1..*" ExpenseVersion : versions
+Expense --> "1" ExpenseVersion : current
+Expense --> "0..1" ExpenseVersion : effective
+ExpenseVersion "1" *-- "1..*" ExpenseAllocation
+ExpenseVersion "1" *-- "0..*" ExpenseApproval : frozen approver set
+ExpenseVersion "*" -- "0..10" Receipt
+ExpenseVersion --> ExpenseCategory
+Expense "1" *-- "0..*" ExpenseCancellationRequest
+ExpenseCancellationRequest "1" *-- "0..*" CancellationApproval
+ExpenseCancellationRequest --> ExpenseVersion : effective version
+Group "1" o-- "0..*" Payment
+UserAccount "1" -- "0..*" GroupMembership
+Notification --> ExpenseVersion
+Notification --> ExpenseCancellationRequest
+ExpenseVersion ..> Money
+Payment ..> Money
+SplitAllocator ..> Money
+SettlementPlanner ..> SettlementPlan
+SettlementPlan *-- Transfer
+BalanceCalculator ..> LedgerPosting
+Payment ..> Transfer : created from
+@enduml

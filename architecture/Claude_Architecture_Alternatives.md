@@ -1,5 +1,7 @@
 # SplitSmart: Architecture Alternatives for the Java Swing MVP
 
+> **HISTORICAL DOCUMENT (superseded 2026-11-03).** This analysis predates customer decisions D01–D41. The selected architecture is **Layered + MVC for a Spring Boot web application** ([ADR-001](ADR-001-Architecture-Selection.md), Accepted). Swing/desktop and Hexagonal/MVP content below is kept unchanged as historical design alternatives. See [Requirements_Conflict_Resolution](../docs/requirements/Requirements_Conflict_Resolution.md) C-01, C-03.
+
 | Item | Value |
 | --- | --- |
 | Author | Claude (independent senior-architect review; AI-generated draft, requires human review per Constitution IX / NFR-008) |

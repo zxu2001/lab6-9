@@ -1,0 +1,55 @@
+@startuml 37_Sequence_Record_Payment
+title Sequence - Record Settlement Payment incl. stale-amount adjustment (D03, D23, D24, D39, D40)
+autonumber
+actor Debtor
+participant "PaymentController" as C
+participant "PaymentService" as PS
+participant "GroupRepository" as GR
+participant "AuthorizationService" as AZ
+participant "PaymentRepository" as PR
+participant "SettlementService" as SS
+participant "Payment (domain)" as P
+participant "AuditService" as AU
+
+Debtor -> C : GET /groups/{g}/settle/{creditor}
+C -> PS : preparePayment(actor, g, creditor)
+PS --> C : displayed amount, submission token (UUID),\nfinality warning
+C --> Debtor : confirmation page with FINALITY WARNING (D40)
+Debtor -> C : POST /groups/{g}/settle/{creditor}\n(displayed, token, CSRF)
+C -> PS : recordSettlement(actor, cmd)
+group TX RW - group ledger lock (SELECT ... FOR UPDATE, lock_timeout 5 s)
+  PS -> GR : lockById(g)
+  alt group ARCHIVED
+    PS --> C : GroupArchivedException (rollback)
+  end
+  PS -> AZ : requireActiveMemberOfActiveGroup(actor, g); creditor ACTIVE, != actor
+  PS -> PR : findByIdempotencyKey(token)
+  alt already recorded with this token
+    PS --> C : ALREADY_RECORDED (replay)
+  end
+  PS -> SS : computePlan(g)  (consistent under lock)
+  SS --> PS : plan
+  PS -> PS : obligation = plan.obligation(actor, creditor)
+  alt obligation == 0.00
+    PS -> AU : record(PAYMENT_NOT_CREATED_ZERO_OBLIGATION)
+    PS --> C : ZERO_OBLIGATION (no payment row, D24)
+  else obligation > 0.00
+    PS -> P : settle(g, transfer, actor, displayed, token, note, today, now)
+    note right of P
+      amount = full current obligation (D23)
+      recorder = debtor only (D39)
+      status = COMPLETED immediately (D03)
+      adjusted = displayed != amount (D24)
+      no mutators exist (D40)
+    end note
+    PS -> PR : insert(payment)
+    alt unique idempotency violation
+      PR --> PS : DataIntegrityViolation
+      PS --> C : ALREADY_RECORDED (after rollback + re-read)
+    end
+    PS -> AU : record(PAYMENT_RECORDED, amount, displayed, adjusted)
+    PS --> C : RECORDED or RECORDED_ADJUSTED
+  end
+end
+C --> Debtor : redirect (PRG) + message showing settled amount\nand adjustment (e.g. shown $33.33, settled $48.33)
+@enduml

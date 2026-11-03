@@ -1,0 +1,34 @@
+@startuml 22_Activity_Calculate_Settlement
+title Activity - Calculate Net Balances and Simplified Settlement Plan (D09, D21, D34)
+
+start
+:Input: groupId (single group only, D21);
+:Load ledger postings for the group\n(effective versions of APPROVED expenses:\npayer +amount, participants -share;\ncompleted payments: debtor +x, creditor -x);
+:Convert every delta to integer cents (no floating point);
+:net(m) = sum of deltas per member\n(members without postings = 0);
+if (sum of all nets == 0?) then (no)
+  :Throw LedgerInconsistencyException\n(alert; no payment possible);
+  stop
+endif
+:C = members with net > 0 (creditors);\nD = members with net < 0 (debtors, amount = -net);
+:Sort C and D by (amount DESC, user id ASC);
+:i = 0; j = 0; transfers = [];
+while (i < |D| and j < |C|?) is (yes)
+  :x = min(D[i].rem, C[j].rem);
+  :append Transfer(D[i] -> C[j], x);
+  :D[i].rem -= x; C[j].rem -= x;
+  if (D[i].rem == 0?) then (yes)
+    :i = i + 1;
+  endif
+  if (C[j].rem == 0?) then (yes)
+    :j = j + 1;
+  endif
+endwhile (no)
+:Assert all remainders are 0\n(conservation, SP-1);
+:Return SettlementPlan(transfers)\n<= k-1 transfers; deterministic;\nNOT guaranteed globally minimal (SP-8);
+note right
+  O(k log k) time, O(k) memory.
+  Plan is derived, never stored (DA-12).
+end note
+stop
+@enduml

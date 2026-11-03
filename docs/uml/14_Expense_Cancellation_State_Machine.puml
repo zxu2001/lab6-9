@@ -1,0 +1,28 @@
+@startuml 14_Expense_Cancellation_State_Machine
+title Cancellation Request State Machine (approved expenses) - D14, D15, D41, DA-19
+
+[*] --> OPEN : creator requests\n[expense APPROVED and no OPEN request\nand no inactive involved member]\n/ freeze approvers = (participants U payer) - creator,\nnotify each approver (D26)
+[*] --> APPROVED : creator requests\n[cancellation approver set empty]\n/ auto-approve, audit (D15)
+
+state OPEN {
+  OPEN : expense stays APPROVED and effective
+  OPEN : no deadline (D41, DA-02)
+  OPEN : edits blocked (DA-39)
+}
+state APPROVED #lightgray {
+  APPROVED : expense -> CANCELLED
+  APPROVED : effective_version_id = NULL
+  APPROVED : completed payments NOT reversed (D40)
+}
+state REJECTED #pink {
+  REJECTED : expense remains APPROVED
+  REJECTED : creator may open a NEW request later (DA-19)
+}
+
+OPEN --> OPEN : approver approves\n[others still undecided]
+OPEN --> APPROVED : approver approves\n[last required approver]
+OPEN --> REJECTED : any approver rejects\n[reason given]
+
+APPROVED --> [*]
+REJECTED --> [*]
+@enduml

@@ -1,0 +1,41 @@
+@startuml 04_Use_Case_Settlement
+title Use Cases - Balances and Settlement (D21, D23, D24, D34, D39, D40)
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Active Member" as Member
+actor "Debtor" as Debtor
+actor "Creditor" as Creditor
+Member <|-- Debtor
+Member <|-- Creditor
+
+rectangle "Settlement" {
+  usecase "View per-group net balances" as S1
+  usecase "View simplified settlement plan" as S2
+  usecase "Prepare settlement\n(see amount + finality warning)" as S3
+  usecase "Record full settlement" as S4
+  usecase "Recalculate current obligation\n(stale amount adjustment)" as S5
+  usecase "View payment history" as S6
+  usecase "Edit / delete / reverse payment" as S7
+}
+
+Member --> S1
+Member --> S2
+Member --> S6
+Debtor --> S3
+Debtor --> S4
+S4 ..> S5 : <<include>>
+Creditor --> S6
+Creditor -[#red,dashed]-> S4 : not allowed (D39)
+Member -[#red,dashed]-> S7 : not allowed for anyone (D40)
+
+note right of S5
+  Amount = full current obligation for
+  (debtor, creditor) in the current plan.
+  Zero -> no payment created (D24).
+end note
+note right of S2
+  Per group only; never offset across
+  groups (D21). Derived, not stored (D34).
+end note
+@enduml

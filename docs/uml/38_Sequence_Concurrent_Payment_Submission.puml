@@ -1,0 +1,45 @@
+@startuml 38_Sequence_Concurrent_Payment_Submission
+title Sequence - Two Concurrent Settlement Submissions (D24, NFR-009; CON-01 / CON-02)
+autonumber
+participant "Request T1\n(tab 1, token K1)" as T1
+participant "Request T2\n(tab 2, token K2 or K1)" as T2
+participant "PaymentService" as PS
+database "PostgreSQL" as DB
+
+note over T1, T2 : Plan: Bob -> Alice 48.33. Bob submits twice almost simultaneously.
+
+T1 -> PS : recordSettlement(Bob, Alice, displayed 48.33, K1)
+activate PS
+PS -> DB : BEGIN; SELECT * FROM expense_groups WHERE id = g FOR UPDATE
+DB --> PS : row lock granted to T1
+
+T2 -> PS : recordSettlement(Bob, Alice, displayed 48.33, K2)
+PS -> DB : BEGIN; SELECT ... FOR UPDATE
+note right of DB : T2 BLOCKS (waits up to lock_timeout = 5 s)
+
+PS -> DB : T1: idempotency K1 not found
+PS -> DB : T1: read ledger postings -> plan -> obligation 48.33
+PS -> DB : T1: INSERT payment(48.33, key K1); INSERT audit
+PS -> DB : T1: COMMIT (releases lock)
+PS --> T1 : RECORDED $48.33
+deactivate PS
+
+DB --> PS : row lock granted to T2
+activate PS
+alt T2 used same token K1 (double click)
+  PS -> DB : T2: findByIdempotencyKey(K1) -> found
+  PS -> DB : COMMIT
+  PS --> T2 : ALREADY_RECORDED (shows T1 payment)
+else T2 used different token K2 (second tab)
+  PS -> DB : T2: read ledger postings (now includes T1 payment)
+  PS -> PS : Bob net = 0.00 -> obligation(Bob, Alice) = 0.00
+  PS -> DB : T2: INSERT audit PAYMENT_NOT_CREATED_ZERO_OBLIGATION; COMMIT
+  PS --> T2 : ZERO_OBLIGATION (no payment)
+else lock wait > 5 s
+  DB --> PS : 55P03 lock_not_available
+  PS -> PS : rollback; retry once with jitter
+  PS --> T2 : outcome of retry or "System busy, retry"
+end
+deactivate PS
+note over T1, T2 : Exactly one COMPLETED payment exists. Unique idempotency_key is the final backstop.
+@enduml

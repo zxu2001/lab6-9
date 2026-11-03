@@ -1,0 +1,86 @@
+@startuml 01_Use_Case_Overview
+title SplitSmart - Use Case Overview (Layered + MVC web application)
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+
+actor "Anonymous Visitor" as Anon
+actor "Verified User" as User
+actor "Active Group Member" as Member
+actor "Group Owner" as Owner
+actor "Required Approver" as Approver
+actor "Debtor" as Debtor
+actor "Amazon SES" as SES <<external>>
+actor "System Clock" as Clock <<system>>
+
+User <|-- Member
+Member <|-- Owner
+Member <|-- Approver
+Member <|-- Debtor
+
+rectangle "SplitSmart" {
+  package "Accounts (D11, D30)" {
+    usecase "Register account" as UC_REG
+    usecase "Verify email" as UC_VER
+    usecase "Reset password" as UC_RST
+    usecase "Sign in / out" as UC_LOGIN
+  }
+  package "Groups (D08, D16, D17, D29)" {
+    usecase "Create group" as UC_GRP
+    usecase "Invite / revoke invitation" as UC_INV
+    usecase "Accept invitation" as UC_ACC
+    usecase "Leave / remove member" as UC_LEAVE
+    usecase "Transfer ownership" as UC_OWN
+    usecase "Manage categories" as UC_CAT
+    usecase "Archive group" as UC_ARC
+  }
+  package "Expenses (D02, D10, D14, D35)" {
+    usecase "Create expense" as UC_EXP
+    usecase "Edit expense (new version)" as UC_EDIT
+    usecase "Approve / reject expense" as UC_APR
+    usecase "Cancel expense" as UC_CAN
+    usecase "Decide cancellation" as UC_CDEC
+  }
+  package "Settlement (D23, D24, D34, D39, D40)" {
+    usecase "View balances & plan" as UC_BAL
+    usecase "Record settlement payment" as UC_PAY
+  }
+  package "Information (D04, D05, D26)" {
+    usecase "View approval-request notifications" as UC_NOT
+    usecase "Generate filtered reports" as UC_RPT
+  }
+}
+
+Anon --> UC_REG
+Anon --> UC_VER
+Anon --> UC_RST
+User --> UC_LOGIN
+User --> UC_GRP
+User --> UC_ACC
+User --> UC_NOT
+Member --> UC_EXP
+Member --> UC_EDIT
+Member --> UC_CAN
+Member --> UC_BAL
+Member --> UC_RPT
+Member --> UC_LEAVE
+Owner --> UC_INV
+Owner --> UC_OWN
+Owner --> UC_CAT
+Owner --> UC_ARC
+Approver --> UC_APR
+Approver --> UC_CDEC
+Debtor --> UC_PAY
+
+UC_REG ..> SES : verification email
+UC_RST ..> SES : reset email
+Clock --> UC_ACC : invitation expiry (7 days)
+
+note bottom of UC_PAY
+  Only the debtor may record (D39).
+  Payments are final (D40).
+end note
+note bottom of UC_EDIT
+  Creator only (D10).
+end note
+@enduml

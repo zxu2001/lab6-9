@@ -1,0 +1,55 @@
+@startuml 32_Sequence_Edit_Approved_Expense
+title Sequence - Edit an APPROVED Expense (new immutable version, D10, D25, D27)
+autonumber
+actor Creator
+participant "ExpenseController" as C
+participant "ExpenseService" as ES
+participant "GroupRepository" as GR
+participant "AuthorizationService" as AZ
+participant "ExpenseEditPolicy" as EP
+participant "SplitAllocator" as SA
+participant "ApproverSetResolver" as AR
+participant "Expense (domain)" as E
+participant "ExpenseRepository" as ER
+participant "NotificationService" as NS
+participant "AuditService" as AU
+
+Creator -> C : POST .../expenses/{e}/edit (basedOnVersion = n, CSRF)
+C -> ES : editExpense(actor, e, cmd)
+group TX RW - group ledger lock (ledger changes)
+  ES -> GR : lockById(groupId)
+  ES -> AZ : requireActiveMemberOfActiveGroup; requireCreator
+  ES -> EP : check(expense, actor, n, ctx, draft)
+  alt REJECTED or CANCELLED
+    EP --> ES : REJECTED_IS_FINAL / CANCELLED_IS_FINAL
+  else basedOn != current version
+    EP --> ES : STALE_VERSION -> 409
+  else OPEN cancellation request
+    EP --> ES : CANCELLATION_PENDING
+  else involved member INACTIVE
+    EP --> ES : INVOLVES_INACTIVE_MEMBER
+  else no change
+    EP --> ES : NO_CHANGES
+  end
+  ES -> SA : allocate(new content)
+  ES -> AR : resolve(creator, new payer, new participants)
+  ES -> E : edit(...)
+  E -> E : v(n) APPROVED -> SUPERSEDED (kept for audit)
+  E -> E : v(n+1) PENDING (frozen allocations, approvers, receipts)
+  E -> E : effective_version_id = NULL;\nstatus = PENDING_APPROVAL
+  note right of E
+    From this commit on, the expense contributes
+    nothing to balances until v(n+1) is approved.
+    Only one version can ever be effective.
+  end note
+  ES -> ER : save
+  alt new approver set empty
+    ES -> E : auto-approve v(n+1); effective = v(n+1)
+  else approvers present
+    ES -> NS : createApprovalRequests(v(n+1), EXPENSE_REAPPROVAL_REQUESTED)
+  end
+  ES -> AU : record(EXPENSE_VERSION_CREATED)
+end
+ES --> C : result
+C --> Creator : redirect: "Re-approval required"
+@enduml

@@ -1,0 +1,45 @@
+@startuml 41_Sequence_Approval_Notification
+title Sequence - Approval-Request Notifications (in-app only, D04, D26)
+autonumber
+participant "ExpenseService /\nExpenseCancellationService" as S
+participant "NotificationService" as NS
+participant "NotificationRepository" as NR
+database "PostgreSQL" as DB
+actor Approver
+participant "NotificationController" as NC
+
+group Same TX as expense version / cancellation request
+  alt new expense version 1 with approvers
+    S -> NS : createApprovalRequests(v1, EXPENSE_APPROVAL_REQUESTED)
+  else edited version n > 1 with approvers
+    S -> NS : createApprovalRequests(vn, EXPENSE_REAPPROVAL_REQUESTED)
+  else cancellation request with approvers
+    S -> NS : createCancellationApprovalRequests(request)
+  else auto-approved, payment, report, rejection, invitation
+    note over S, NS : NO notification is created (D26)
+  end
+  loop each frozen required approver (creator never included)
+    NS -> NR : insert(recipient, type, expense, version or request)
+    NR -> DB : INSERT (unique per recipient + version/request)
+    alt duplicate
+      DB --> NR : unique violation -> TX rollback (bug guard)
+    end
+  end
+end
+note over NS : no email, no push (D04, D31)
+
+Approver -> NC : GET /notifications
+NC -> NS : listMyNotifications(actor, unreadOnly, page)
+NS -> NR : find WHERE recipient_user_id = actor
+NS --> NC : views with live action state\n(ACTION_REQUIRED / DONE_BY_YOU / NO_LONGER_REQUIRED)
+NC --> Approver : inbox with unread badge
+Approver -> NC : POST /notifications/{n}/open (CSRF)
+NC -> NS : open(actor, n)
+alt notification of another user
+  NS --> NC : NotFoundException (404)
+else own notification
+  NS -> NR : set read_at = now (idempotent)
+  NS --> NC : target link
+  NC --> Approver : redirect to expense / cancellation request
+end
+@enduml
