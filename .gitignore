@@ -64,3 +64,6 @@ Desktop.ini
 !.devcontainer/
 !.devcontainer/Dockerfile
 !.devcontainer/devcontainer.json
+
+# Misc files
+*.zip
