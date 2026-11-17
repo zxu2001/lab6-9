@@ -1,103 +1,178 @@
-import Image from "next/image";
+import Link from "next/link";
+import { requireCurrentUser } from "@/lib/demo-auth";
+import { getGroupSummaries, getPendingApprovalsFor, getRecentActivity } from "@/lib/queries";
+import { prisma } from "@/lib/db";
+import { formatCents } from "@/lib/money";
+import { firstName, formatShortDate, timeAgo } from "@/lib/format";
+import { Balance, Card, CardHeader, EmptyState, LinkButton, Money, PageHeader, StatusBadge } from "@/components/ui";
+import { DecisionForm } from "@/components/decision-form";
 
-export default function Home() {
+export default async function DashboardPage() {
+  const me = await requireCurrentUser();
+  const [groups, approvals, activity, users] = await Promise.all([
+    getGroupSummaries(me.id),
+    getPendingApprovalsFor(me.id),
+    getRecentActivity(me.id),
+    prisma.user.findMany({ select: { id: true, name: true } }),
+  ]);
+  const nameOf = (id: string) => firstName(users.find((u) => u.id === id)?.name ?? "Someone");
+
+  // Totals are shown side by side, never netted across groups (FR-049).
+  const owedToMe = groups.reduce((s, g) => s + Math.max(0, g.myNetCents), 0);
+  const iOwe = groups.reduce((s, g) => s + Math.max(0, -g.myNetCents), 0);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <>
+      <PageHeader
+        title={`Hi, ${firstName(me.name)} 👋`}
+        subtitle="Here's where things stand across your groups."
+        actions={
+          <>
+            <LinkButton href="/expenses/new">+ Add expense</LinkButton>
+            <LinkButton href="/reports" variant="secondary">
+              View reports
+            </LinkButton>
+          </>
+        }
+      />
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label="You are owed" value={formatCents(owedToMe)} tone="emerald" hint={`across ${groups.filter((g) => g.myNetCents > 0).length} group(s)`} />
+        <StatCard label="You owe" value={formatCents(iOwe)} tone="rose" hint={`across ${groups.filter((g) => g.myNetCents < 0).length} group(s)`} />
+        <StatCard
+          label="Waiting on you"
+          value={`${approvals.length} approval${approvals.length === 1 ? "" : "s"}`}
+          tone="amber"
+          hint={approvals.length ? <Link className="underline" href="/approvals">Review now →</Link> : "You're all caught up"}
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="space-y-6 lg:col-span-3">
+          <Card>
+            <CardHeader title="Group balances" subtitle="Your net position in each group" action={<Link href="/groups" className="text-sm font-medium text-indigo-600 hover:underline">All groups</Link>} />
+            {groups.length === 0 ? (
+              <EmptyState icon="👥" title="You're not in any groups yet">
+                Groups are created in the production app. Switch to another demo user to explore.
+              </EmptyState>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {groups.map((g) => (
+                  <li key={g.id}>
+                    <Link href={`/groups/${g.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 sm:px-5">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl" aria-hidden>
+                        {g.emoji}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-900">{g.name}</p>
+                        <p className="truncate text-sm text-slate-500">
+                          {g.myTransfers.length === 0
+                            ? "You're settled up"
+                            : g.myTransfers
+                                .map((t) =>
+                                  t.fromUserId === me.id
+                                    ? `You owe ${nameOf(t.toUserId)} ${formatCents(t.amountCents)}`
+                                    : `${nameOf(t.fromUserId)} owes you ${formatCents(t.amountCents)}`,
+                                )
+                                .join(" · ")}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <Balance cents={g.myNetCents} />
+                        {g.pendingCount > 0 && <p className="text-xs text-amber-700">{g.pendingCount} pending</p>}
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Recent activity" />
+            {activity.length === 0 ? (
+              <EmptyState icon="🧾" title="No activity yet" />
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {activity.map((a) => (
+                  <li key={`${a.kind}-${a.id}`}>
+                    <Link
+                      href={a.kind === "expense" ? `/expenses/${a.id}` : `/groups/${a.groupId}?tab=payments`}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 sm:px-5"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100" aria-hidden>
+                        {a.kind === "expense" ? "🧾" : "💸"}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-900">{a.title}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {a.groupName} · {a.kind === "expense" ? `paid by ${firstName(a.actorName)} · ` : ""}
+                          {formatShortDate(a.date)} · added {timeAgo(a.createdAt)}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <Money cents={a.amountCents} className="text-sm font-semibold" />
+                        <StatusBadge status={a.kind === "expense" ? a.status : "PAYMENT"} />
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        <div className="lg:col-span-2">
+          <Card>
+            <CardHeader
+              title="Pending approvals"
+              subtitle="Expenses that need your decision"
+              action={approvals.length > 3 ? <Link href="/approvals" className="text-sm font-medium text-indigo-600 hover:underline">See all</Link> : undefined}
+            />
+            {approvals.length === 0 ? (
+              <EmptyState icon="✅" title="Nothing to review">
+                When someone adds an expense involving you, it will show up here.
+              </EmptyState>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {approvals.slice(0, 3).map(({ expense: e }) => {
+                  const myShare = e.shares.find((s) => s.userId === me.id)?.shareCents ?? 0;
+                  return (
+                    <li key={e.id} className="space-y-3 px-4 py-4 sm:px-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <Link href={`/expenses/${e.id}`} className="font-medium text-slate-900 hover:underline">
+                            {e.description}
+                          </Link>
+                          <p className="text-xs text-slate-500">
+                            {e.group.name} · {firstName(e.payer.name)} paid · {formatShortDate(e.expenseDate)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <Money cents={e.amountCents} className="font-semibold" />
+                          <p className="text-xs text-slate-500">your share {formatCents(myShare)}</p>
+                        </div>
+                      </div>
+                      <DecisionForm expenseId={e.id} returnTo="/" compact />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StatCard({ label, value, hint, tone }: { label: string; value: string; hint?: React.ReactNode; tone: "emerald" | "rose" | "amber" }) {
+  const accent = { emerald: "text-emerald-700", rose: "text-rose-700", amber: "text-amber-700" }[tone];
+  return (
+    <Card className="px-5 py-4" as="div">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${accent}`}>{value}</p>
+      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+    </Card>
   );
 }

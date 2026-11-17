@@ -1,14 +1,177 @@
+// SplitSmart demo prototype schema (SQLite + Prisma 7).
+// Money is always stored as integer cents. Percentages are stored as integer
+// basis points (12.50% = 1250). Balances are derived, never stored.
+
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
+// Pre-existing environment check table (kept unchanged).
 model EnvironmentCheck {
   id        Int      @id @default(autoincrement())
   message   String
   createdAt DateTime @default(now())
+}
+
+enum MemberRole {
+  OWNER
+  MEMBER
+}
+
+enum SplitMethod {
+  EQUAL
+  PERCENTAGE
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id          String   @id @default(cuid())
+  // Stable ordering key used for deterministic leftover-cent allocation.
+  seq         Int      @unique
+  name        String
+  email       String   @unique
+  avatarColor String   @default("#6366f1")
+  createdAt   DateTime @default(now())
+
+  memberships      GroupMember[]
+  expensesPaid     Expense[]         @relation("ExpensePayer")
+  expensesCreated  Expense[]         @relation("ExpenseCreator")
+  shares           ExpenseShare[]
+  approvals        ExpenseApproval[]
+  paymentsSent     Payment[]         @relation("PaymentFrom")
+  paymentsReceived Payment[]         @relation("PaymentTo")
+  notifications    Notification[]
+}
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  emoji       String   @default("💸")
+  createdAt   DateTime @default(now())
+
+  members  GroupMember[]
+  expenses Expense[]
+  payments Payment[]
+}
+
+model GroupMember {
+  id       String     @id @default(cuid())
+  groupId  String
+  userId   String
+  role     MemberRole @default(MEMBER)
+  joinedAt DateTime   @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+model Expense {
+  id              String        @id @default(cuid())
+  groupId         String
+  description     String
+  category        String        @default("General")
+  amountCents     Int
+  expenseDate     DateTime
+  splitMethod     SplitMethod
+  status          ExpenseStatus @default(PENDING)
+  payerId         String
+  createdById     String
+  rejectionReason String?
+  decidedAt       DateTime?
+  createdAt       DateTime      @default(now())
+
+  group         Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer         User              @relation("ExpensePayer", fields: [payerId], references: [id])
+  createdBy     User              @relation("ExpenseCreator", fields: [createdById], references: [id])
+  shares        ExpenseShare[]
+  approvals     ExpenseApproval[]
+  notifications Notification[]
+
+  @@index([groupId, status])
+  @@index([expenseDate])
+}
+
+model ExpenseShare {
+  id              String @id @default(cuid())
+  expenseId       String
+  userId          String
+  shareCents      Int
+  // Only set for percentage splits (basis points, sums to 10000).
+  percentBasisPts Int?
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([expenseId, userId])
+}
+
+model ExpenseApproval {
+  id         String           @id @default(cuid())
+  expenseId  String
+  approverId String
+  decision   ApprovalDecision @default(PENDING)
+  reason     String?
+  decidedAt  DateTime?
+  createdAt  DateTime         @default(now())
+
+  expense  Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  approver User    @relation(fields: [approverId], references: [id])
+
+  @@unique([expenseId, approverId])
+  @@index([approverId, decision])
+}
+
+// Payments are recorded settlements between two members of one group.
+// PROTOTYPE: no money moves; this only records that a payment happened.
+model Payment {
+  id          String   @id @default(cuid())
+  groupId     String
+  fromUserId  String
+  toUserId    String
+  amountCents Int
+  paidAt      DateTime
+  note        String   @default("")
+  createdAt   DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  from  User  @relation("PaymentFrom", fields: [fromUserId], references: [id])
+  to    User  @relation("PaymentTo", fields: [toUserId], references: [id])
+
+  @@index([groupId])
+  @@index([paidAt])
+}
+
+// PROTOTYPE: in-app notifications only (approval requests). No email/push.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  expenseId String?
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expense Expense? @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
 }
