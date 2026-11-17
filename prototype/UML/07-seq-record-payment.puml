@@ -1,0 +1,39 @@
+@startuml 07-seq-record-payment
+title Sequence – Settle up (recordPayment server action)
+autonumber
+actor Debtor
+participant "settle page\n/groups/[id]/settle" as Page
+participant "payment-form.tsx\n(client)" as Form
+participant "actions.ts\nrecordPayment" as Act
+participant "queries.ts\ngetGroupLedger" as Q
+participant "balances.ts" as Bal
+database "Prisma / SQLite" as DB
+
+Debtor -> Page : open settle page
+Page -> Q : getGroupLedger(groupId)
+Q -> DB : members, APPROVED expenses, payments
+Q -> Bal : computeNetBalances() → settlementPlan()
+Bal --> Q : Transfer[]
+Page --> Form : render transfers I owe\n(displayedCents)
+Debtor -> Form : choose payee, date, note,\ntick "payments are final"
+Form -> Act : FormData
+Act -> Act : validate toUserId, paidAt, confirmFinal
+group $transaction (stale-amount protection)
+  Act -> DB : GroupMember(groupId, me)?
+  Act -> Q : getGroupLedger(groupId, tx)
+  Q --> Act : fresh plan
+  Act -> Act : find transfer me → toUserId
+  alt none
+    Act --> Form : error "You no longer owe this member…"
+  else found
+    Act -> DB : create Payment{amountCents = transfer.amountCents}
+  end
+end
+note right of Act
+  The server records the *recomputed*
+  amount, not the one shown in the form;
+  "&adjusted=1" is added if they differ.
+  PROTOTYPE: no real money moves.
+end note
+Act --> Debtor : redirect /groups/{id}?tab=balances&notice=payment-recorded
+@enduml

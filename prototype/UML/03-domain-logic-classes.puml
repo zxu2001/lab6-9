@@ -1,0 +1,95 @@
+@startuml 03-domain-logic-classes
+' Pure TypeScript modules (no DB) that hold the financial rules.
+title SplitSmart – Domain logic modules (src/lib)
+
+package "split.ts" {
+  interface Participant {
+    userId : string
+    seq : number
+  }
+  interface Allocation {
+    userId : string
+    shareCents : number
+    percentBasisPts? : number
+  }
+  class split <<module>> {
+    + allocateEqual(amountCents, participants) : Allocation[]
+    + allocatePercentage(amountCents, participants & {basisPts}) : Allocation[]
+  }
+  note right of split
+    Invariant: Σ shareCents === amountCents
+    EQUAL: floor(A/n) each, the (A mod n)
+      lowest-seq users get +1¢
+    PERCENTAGE: Σ bps must = 10000; floor each,
+      leftover ¢ → largest fractional remainder,
+      ties → lowest seq
+  end note
+}
+
+package "balances.ts" {
+  interface LedgerExpense {
+    payerId : string
+    amountCents : number
+    shares : {userId, shareCents}[]
+  }
+  interface LedgerPayment {
+    fromUserId : string
+    toUserId : string
+    amountCents : number
+  }
+  interface Transfer {
+    fromUserId : string
+    toUserId : string
+    amountCents : number
+  }
+  class balances <<module>> {
+    + computeNetBalances(memberIds, approvedExpenses, payments) : Map<userId, cents>
+    + settlementPlan(net, order) : Transfer[]
+  }
+  note right of balances
+    net > 0 → group owes the member
+    net < 0 → member owes the group
+    expense: payer += amount, each share −= share
+    payment: from += amount, to −= amount
+    Plan: greedy largest debtor ↔ largest creditor
+    (≤ k−1 transfers)
+  end note
+}
+
+package "money.ts" {
+  class money <<module>> {
+    + MAX_AMOUNT_CENTS = 100_000_000
+    + parseDollarsToCents(s) : number | null
+    + parsePercentToBasisPoints(s) : number | null
+    + formatCents(c) : string
+    + formatSignedCents(c) : string
+    + formatBasisPoints(bp) : string
+  }
+}
+
+package "queries.ts (server-only)" {
+  class queries <<module>> {
+    + getGroupForMember(groupId, userId)
+    + getGroupLedger(groupId, tx?) : {users, net, plan}
+    + getGroupSummaries(userId) : GroupSummary[]
+    + … approvals / reports helpers
+  }
+  class GroupSummary {
+    id, name, emoji, description
+    memberCount : number
+    myNetCents : number
+    pendingCount : number
+    approvedTotalCents : number
+    myTransfers : Transfer[]
+  }
+}
+
+split ..> Participant
+split ..> Allocation
+balances ..> LedgerExpense
+balances ..> LedgerPayment
+balances ..> Transfer
+queries ..> balances : uses
+queries ..> GroupSummary : returns
+GroupSummary o-- Transfer
+@enduml

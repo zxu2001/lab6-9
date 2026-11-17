@@ -1,0 +1,92 @@
+@startuml 02-architecture-components
+' How the Next.js App Router prototype is layered.
+title SplitSmart prototype – Component / layer architecture
+skinparam componentStyle rectangle
+left to right direction
+
+actor "Browser user" as U
+
+package "Client (\"use client\")" #E3F2FD {
+  component "expense-form.tsx" as EF
+  component "decision-form.tsx" as DF
+  component "payment-form.tsx" as PF
+  component "user-switcher.tsx" as US
+  component "client-ui.tsx" as CUI
+}
+
+package "Server Components – src/app (pages)" #E8F5E9 {
+  component "/ (dashboard)" as P_HOME
+  component "/groups" as P_GROUPS
+  component "/groups/[groupId]" as P_GROUP
+  component "/groups/[groupId]/expenses/new\n/expenses/new" as P_NEW
+  component "/groups/[groupId]/settle" as P_SETTLE
+  component "/expenses/[expenseId]" as P_EXP
+  component "/approvals" as P_APPR
+  component "/notifications" as P_NOTIF
+  component "/reports" as P_REP
+  component "layout.tsx + ui.tsx" as LAYOUT
+}
+
+package "Server Actions – src/app/actions.ts" #FFF3E0 {
+  component "createExpense" as A_CE
+  component "decideExpense" as A_DE
+  component "recordPayment" as A_RP
+  component "switchDemoUser" as A_SU
+  component "markAllNotificationsRead" as A_MN
+}
+
+package "Server-only lib" #F3E5F5 {
+  component "queries.ts\n(getGroupLedger,\ngetGroupSummaries, …)" as Q
+  component "demo-auth.ts\n(cookie → User)" as AUTH
+  component "db.ts\n(PrismaClient singleton)" as DB
+}
+
+package "Pure domain logic (unit tested)" #FFEBEE {
+  component "split.ts\nallocateEqual / allocatePercentage" as SPLIT
+  component "balances.ts\ncomputeNetBalances / settlementPlan" as BAL
+  component "money.ts\nparse/format cents & bps" as MONEY
+  component "constants.ts\nCATEGORIES, ActionState" as CONST
+}
+
+database "SQLite\nprisma/dev.db" as SQLITE
+component "Prisma 7 client\n+ better-sqlite3 adapter" as PRISMA
+
+U --> P_HOME : HTTP GET
+U --> EF : fills forms
+EF ..> A_CE : form action
+DF ..> A_DE : form action
+PF ..> A_RP : form action
+US ..> A_SU : form action
+
+P_HOME --> Q
+P_GROUP --> Q
+P_SETTLE --> Q
+P_APPR --> Q
+P_REP --> Q
+P_EXP --> Q
+P_NOTIF --> Q
+P_GROUPS --> Q
+P_NEW --> Q
+LAYOUT --> AUTH
+
+A_CE --> SPLIT
+A_CE --> MONEY
+A_RP --> Q : recompute plan in tx
+A_CE --> AUTH
+A_DE --> AUTH
+A_RP --> AUTH
+A_CE --> DB
+A_DE --> DB
+A_RP --> DB
+A_MN --> DB
+A_SU --> DB
+
+Q --> BAL
+Q --> DB
+AUTH --> DB
+DB --> PRISMA
+PRISMA --> SQLITE
+
+EF ..> CONST
+EF ..> MONEY
+@enduml

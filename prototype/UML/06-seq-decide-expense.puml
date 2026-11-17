@@ -1,0 +1,35 @@
+@startuml 06-seq-decide-expense
+title Sequence – Approve / reject expense (decideExpense server action)
+autonumber
+actor Approver
+participant "decision-form.tsx\n(client)" as Form
+participant "actions.ts\ndecideExpense" as Act
+participant "demo-auth.ts" as Auth
+database "Prisma / SQLite" as DB
+
+Approver -> Form : click Approve / Reject (+ reason)
+Form -> Act : FormData{expenseId, decision, reason, returnTo}
+Act -> Auth : requireCurrentUser()
+Auth --> Act : me
+alt REJECTED without reason, or reason > 300 chars
+  Act --> Form : {status:error, fieldErrors.reason}
+end
+group $transaction
+  Act -> DB : find ExpenseApproval(expenseId, me) incl. expense
+  alt no row / expense not PENDING / already decided
+    Act --> Form : {status:error, message}
+  end
+  Act -> DB : update approval {decision, reason, decidedAt}
+  alt decision = REJECTED
+    Act -> DB : update Expense {status: REJECTED,\nrejectionReason, decidedAt}
+  else decision = APPROVED
+    Act -> DB : count approvals still PENDING
+    opt remaining = 0
+      Act -> DB : update Expense {status: APPROVED, decidedAt}
+    end
+  end
+  Act -> DB : mark my notifications for this expense read
+end
+Act -> Act : revalidatePath("/")
+Act --> Approver : redirect returnTo?notice=approved|rejected
+@enduml

@@ -1,0 +1,32 @@
+@startuml 04-expense-state
+' Lifecycle of Expense.status (and how ExpenseApproval rows drive it).
+title Expense lifecycle (Expense.status)
+
+[*] --> Decide : createExpense()
+
+state Decide <<choice>>
+Decide --> APPROVED : approvers = ∅\n(creator is the only\nparticipant & payer)
+Decide --> PENDING : approvers =\n(participants ∪ payer) − creator\n→ one ExpenseApproval + Notification each
+
+state PENDING {
+  state "waiting on approvers" as W
+  W --> W : an approver APPROVES\n(other approvals still PENDING)
+}
+
+PENDING --> APPROVED : last PENDING approval\nis APPROVED
+PENDING --> REJECTED : any approver REJECTS\n(reason required →\nrejectionReason, decidedAt)
+
+APPROVED : counted in balances\n& settlement plan
+REJECTED : ignored by balances
+PENDING : ignored by balances
+
+APPROVED --> [*]
+REJECTED --> [*]
+
+note right of PENDING
+  Guards in decideExpense():
+  • caller must have an ExpenseApproval row
+  • expense must still be PENDING
+  • caller's decision must still be PENDING
+end note
+@enduml

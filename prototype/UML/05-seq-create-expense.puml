@@ -1,0 +1,45 @@
+@startuml 05-seq-create-expense
+title Sequence – Create expense (createExpense server action)
+autonumber
+actor User
+participant "expense-form.tsx\n(client)" as Form
+participant "actions.ts\ncreateExpense" as Act
+participant "demo-auth.ts" as Auth
+participant "money.ts" as Money
+participant "split.ts" as Split
+database "Prisma / SQLite" as DB
+
+User -> Form : fill description, amount, date,\ncategory, payer, participants, split
+Form -> Act : submit FormData
+Act -> Auth : requireCurrentUser()
+Auth -> DB : user by cookie id (or first by seq)
+DB --> Auth : me
+Act -> DB : group where id & me is member\n(include members.user)
+alt not a member
+  Act --> Form : {status:error, "Group not found…"}
+end
+Act -> Money : parseDollarsToCents(amount)
+Act -> Act : validate description, date,\ncategory, payer ∈ members,\nparticipants ⊆ members
+alt EQUAL
+  Act -> Split : allocateEqual(cents, participants)
+else PERCENTAGE
+  Act -> Money : parsePercentToBasisPoints(each)
+  Act -> Act : check each in (0,100], Σ = 100%
+  Act -> Split : allocatePercentage(cents, participants)
+end
+Split --> Act : Allocation[]
+alt any field errors
+  Act --> Form : {status:error, fieldErrors}
+  Form --> User : highlight fields
+else valid
+  Act -> Act : approvers = (participants ∪ payer) − me
+  group $transaction
+    Act -> DB : create Expense (+ shares, + approvals)\nstatus = approvers empty ? APPROVED : PENDING
+    opt has approvers
+      Act -> DB : notification.createMany(one per approver)
+    end
+  end
+  Act -> Act : revalidatePath("/")
+  Act --> User : redirect /expenses/{id}?notice=…
+end
+@enduml

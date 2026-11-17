@@ -1,0 +1,147 @@
+@startuml 01-domain-er
+' Entity-relationship view of prisma/schema.prisma (SQLite).
+' Money = integer cents; percentages = integer basis points (10000 = 100%).
+' Balances are NOT stored – they are derived from APPROVED expenses + payments.
+title SplitSmart – Database schema (Prisma / SQLite)
+hide circle
+skinparam linetype ortho
+skinparam class {
+  BackgroundColor<<enum>> #FFF8E1
+}
+
+entity User {
+  * id : String <<PK, cuid>>
+  --
+  * seq : Int <<unique>>  -- tie-break order
+  * name : String
+  * email : String <<unique>>
+  avatarColor : String = "#6366f1"
+  createdAt : DateTime
+}
+
+entity Group {
+  * id : String <<PK>>
+  --
+  * name : String
+  description : String = ""
+  emoji : String = "💸"
+  createdAt : DateTime
+}
+
+entity GroupMember {
+  * id : String <<PK>>
+  --
+  * groupId : String <<FK>>
+  * userId : String <<FK>>
+  role : MemberRole = MEMBER
+  joinedAt : DateTime
+  ..
+  unique(groupId, userId)
+}
+
+entity Expense {
+  * id : String <<PK>>
+  --
+  * groupId : String <<FK>>
+  * payerId : String <<FK User>>
+  * createdById : String <<FK User>>
+  * description : String
+  category : String = "General"
+  * amountCents : Int
+  * expenseDate : DateTime
+  * splitMethod : SplitMethod
+  status : ExpenseStatus = PENDING
+  rejectionReason : String?
+  decidedAt : DateTime?
+  createdAt : DateTime
+}
+
+entity ExpenseShare {
+  * id : String <<PK>>
+  --
+  * expenseId : String <<FK>>
+  * userId : String <<FK>>
+  * shareCents : Int
+  percentBasisPts : Int?  -- PERCENTAGE only
+  ..
+  unique(expenseId, userId)
+  Σ shareCents = Expense.amountCents
+}
+
+entity ExpenseApproval {
+  * id : String <<PK>>
+  --
+  * expenseId : String <<FK>>
+  * approverId : String <<FK User>>
+  decision : ApprovalDecision = PENDING
+  reason : String?
+  decidedAt : DateTime?
+  createdAt : DateTime
+  ..
+  unique(expenseId, approverId)
+}
+
+entity Payment {
+  * id : String <<PK>>
+  --
+  * groupId : String <<FK>>
+  * fromUserId : String <<FK User>>
+  * toUserId : String <<FK User>>
+  * amountCents : Int
+  * paidAt : DateTime
+  note : String = ""
+  createdAt : DateTime
+}
+
+entity Notification {
+  * id : String <<PK>>
+  --
+  * userId : String <<FK>>
+  expenseId : String? <<FK>>
+  * message : String
+  read : Boolean = false
+  createdAt : DateTime
+}
+
+entity EnvironmentCheck {
+  * id : Int <<PK, autoincrement>>
+  --
+  message : String
+  createdAt : DateTime
+}
+note bottom of EnvironmentCheck : Legacy lab table – unused by the app.
+
+enum MemberRole <<enum>> {
+  OWNER
+  MEMBER
+}
+enum SplitMethod <<enum>> {
+  EQUAL
+  PERCENTAGE
+}
+enum ExpenseStatus <<enum>> {
+  PENDING
+  APPROVED
+  REJECTED
+}
+enum ApprovalDecision <<enum>> {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+User   ||--o{ GroupMember : "memberships\n(cascade)"
+Group  ||--o{ GroupMember : "members\n(cascade)"
+Group  ||--o{ Expense : "expenses\n(cascade)"
+Group  ||--o{ Payment : "payments\n(cascade)"
+User   ||--o{ Expense : "pays (payerId)"
+User   ||--o{ Expense : "creates (createdById)"
+Expense ||--|{ ExpenseShare : "shares\n(cascade)"
+User   ||--o{ ExpenseShare : "owes share"
+Expense ||--o{ ExpenseApproval : "approvals\n(cascade)"
+User   ||--o{ ExpenseApproval : "approves"
+User   ||--o{ Payment : "sends (fromUserId)"
+User   ||--o{ Payment : "receives (toUserId)"
+User   ||--o{ Notification : "inbox\n(cascade)"
+Expense |o--o{ Notification : "about\n(cascade)"
+@enduml

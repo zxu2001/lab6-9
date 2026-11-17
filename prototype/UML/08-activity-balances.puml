@@ -1,0 +1,37 @@
+@startuml 08-activity-balances
+title Activity – Deriving balances and the settlement plan (balances.ts)
+start
+:net[m] = 0 for every group member;
+partition "computeNetBalances" {
+  while (for each APPROVED expense?) is (next)
+    :net[payer] += amountCents;
+    :for each share: net[share.user] -= shareCents;
+  endwhile
+  while (for each Payment?) is (next)
+    :net[from] += amountCents;
+    :net[to]   -= amountCents;
+  endwhile
+}
+note right
+  Σ net = 0 always.
+  net > 0 → is owed, net < 0 → owes
+end note
+partition "settlementPlan (greedy)" {
+  :debtors = net < 0; creditors = net > 0;
+  while (debtors and creditors non-empty?) is (yes)
+    :sort both by |amount| desc, ties by seq;
+    :d = largest debtor; c = largest creditor;
+    :amt = min(-d, c);
+    :emit Transfer(d → c, amt);
+    :d += amt; c -= amt;
+    if (d == 0?) then (yes)
+      :remove d;
+    endif
+    if (c == 0?) then (yes)
+      :remove c;
+    endif
+  endwhile (no)
+}
+:return Transfer[] (≤ k−1 transfers);
+stop
+@enduml
